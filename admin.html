@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Super Admin</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+  <script src="assets/app.js"></script>
+  <style>
+    .client-cell .name { font-weight: 600; }
+    .client-cell .sub { color: var(--muted); font-size: .82rem; }
+    .quick-days { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .note { padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--warning-soft); }
+    .note + .note { margin-top: .5rem; }
+    .note .meta { font-size: .78rem; color: var(--muted); margin-top: .35rem; display: flex; justify-content: space-between; gap: .5rem; align-items: center; }
+    .log-line { display: flex; gap: .75rem; padding: .6rem 0; border-bottom: 1px solid var(--border); font-size: .9rem; }
+    .log-line:last-child { border-bottom: 0; }
+    .log-line time { color: var(--muted); font-size: .8rem; white-space: nowrap; min-width: 112px; }
+    .filters { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .filters .input { flex: 1; min-width: 200px; }
+    .filters select.input { flex: 0 0 auto; width: auto; min-width: 160px; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a href="#overview" class="logo-mark"><span class="dot">S</span><span><span class="app-name"></span> <span class="badge badge-primary">Admin</span></span></a>
+      <nav class="nav" id="nav">
+        
+      </nav>
+      <div class="sidebar-footer">
+        <div class="small muted mb-1" id="admin-email"></div>
+        <div class="nav"><button id="logout-btn"></button></div>
+      </div>
+    </aside>
+    <div class="sidebar-backdrop hidden" id="sidebar-backdrop"></div>
+
+    <div class="app-content">
+      <header class="topbar">
+        <button class="btn btn-ghost btn-icon menu-toggle" id="menu-toggle" aria-label="Menu"></button>
+        <strong id="topbar-title">Super Admin</strong>
+        <span></span>
+      </header>
+      <main class="main" id="main"><div class="page-loader"><div class="spinner"></div></div></main>
+    </div>
+  </div>
+
+  <script>
+    /* =========================================================================
+       SUPER ADMIN. Toutes les actions passent par des fonctions SQL qui
+       vérifient elles-mêmes is_admin() : masquer cette page ne protège rien,
+       c'est la base qui refuse.
+       ========================================================================= */
+    const PAGE_SIZE = 20;
+    const state = { status: null, plans: [], clientsQuery: { search: "", status: "", page: 0 }, logsPage: 0 };
+    const main = document.getElementById("main");
+
+    const NAV = [
+      ["overview", "chart", "Tableau de bord"],
+      ["clients", "users", "Clients"],
+      ["stores", "store", "Boutiques"],
+      ["plans", "card", "Formules"],
+      ["logs", "file", "Journal"],
+    ];
+    const FEATURES = {
+      orders: "Commandes", whatsapp: "Commande WhatsApp", stats: "Statistiques",
+      advanced_stats: "Statistiques avancées", custom_theme: "Personnalisation avancée",
+    };
+    const STATUS_FILTERS = [
+      ["", "Tous les statuts"], ["pending", "En attente"], ["active", "Actifs"],
+      ["expiring", "Expirent sous 7 jours"], ["suspended", "Suspendus"], ["expired", "Expirés"],
+    ];
+    const ACTION_LABELS = {
+      signup: "Inscription", activate: "Activation", suspend: "Suspension", reactivate: "Réactivation",
+      change_plan: "Changement de plan", extend: "Prolongation", set_dates: "Modification des dates",
+      expire: "Expiration automatique", promote_admin: "Promotion admin",
+      delete_product: "Suppression produit", delete_categorie: "Suppression catégorie",
+    };
+
+    /* ----------------------------- Coquille --------------------------------- */
+    function renderShell() {
+      document.querySelectorAll(".app-name").forEach((el) => (el.textContent = APP_NAME));
+      document.getElementById("nav").innerHTML = NAV.map(([r, ic, label]) =>
+        `<a href="#${r}" data-route="${r}">${icon(ic)}<span>${label}</span>${r === "clients" ? '<span class="badge badge-warning count hidden" id="pending-count"></span>' : ""}</a>`).join("");
+      document.getElementById("logout-btn").innerHTML = `${icon("logout")}<span>Se déconnecter</span>`;
+      document.getElementById("logout-btn").onclick = logout;
+      document.getElementById("menu-toggle").innerHTML = icon("menu");
+      document.getElementById("menu-toggle").onclick = () => toggleSidebar(true);
+      document.getElementById("sidebar-backdrop").onclick = () => toggleSidebar(false);
+    }
+    function toggleSidebar(open) {
+      document.getElementById("sidebar").classList.toggle("open", open);
+      document.getElementById("sidebar-backdrop").classList.toggle("hidden", !open);
+    }
+    function setActive(route, title) {
+      document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === route));
+      document.getElementById("topbar-title").textContent = title;
+      document.title = title + " · Super Admin";
+      toggleSidebar(false);
+    }
+
+    async function router() {
+      const [route, param] = (location.hash.slice(1) || "overview").split("/");
+      main.innerHTML = '<div class="page-loader"><div class="spinner"></div></div>';
+      window.scrollTo(0, 0);
+      try {
+        if (route === "clients") await renderClients();
+        else if (route === "client" && param) await renderClient(param);
+        else if (route === "stores") await renderStores();
+        else if (route === "plans") await renderPlans();
+        else if (route === "logs") await renderLogs();
+        else await renderOverview();
+      } catch (e) {
+        console.error(e);
+        main.innerHTML = `<div class="card empty">Une erreur est survenue. <button class="btn btn-sm mt-1" onclick="router()">Réessayer</button></div>`;
+      }
+    }
+
+    async function loadPlans() {
+      const { data, error } = await sb.from("plans").select("*").order("sort_order").order("price");
+      if (error) throw error;
+      state.plans = data;
+      return data;
+    }
+
+    async function refreshPendingCount() {
+      try {
+        const { data, error } = await sb.rpc("admin_stats");
+        if (error) throw error;
+        const el = document.getElementById("pending-count");
+        el.textContent = data.pending;
+        el.classList.toggle("hidden", !data.pending);
+        return data;
+      } catch (e) { console.error(e); return null; }
+    }
+
+    /* ----------------------------- Tableau de bord -------------------------- */
+    async function renderOverview() {
+      setActive("overview", "Tableau de bord");
+      const stats = await refreshPendingCount();
+      const [pending, expiring] = await Promise.all([
+        sb.rpc("admin_list_clients", { p_status: "pending", p_limit: 5, p_offset: 0 }),
+        sb.rpc("admin_list_clients", { p_status: "expiring", p_limit: 5, p_offset: 0 }),
+      ]);
+      if (pending.error) throw pending.error;
+      if (expiring.error) throw expiring.error;
+      // Les notifications "nouvelle inscription" sont considérées comme vues.
+      sb.from("notifications").update({ is_read: true }).eq("user_id", state.status.user_id).eq("is_read", false).then(() => {});
+
+      const tile = (label, value, filter, kind = "") =>
+        `<a class="card stat" href="#clients" data-filter="${filter}" style="text-decoration:none;color:inherit">
+           <span class="label">${label}</span><span class="value ${kind}">${value}</span></a>`;
+      main.innerHTML = `
+        <div class="page-title"><h1>Tableau de bord</h1></div>
+        <div class="stats">
+          ${tile("Clients totaux", stats.total_clients, "")}
+          ${tile("Nouveaux (7 jours)", stats.new_clients, "")}
+          ${tile("En attente", stats.pending, "pending")}
+          ${tile("Actifs", stats.active, "active")}
+          ${tile("Expirent bientôt", stats.expiring_soon, "expiring")}
+          ${tile("Suspendus", stats.suspended, "suspended")}
+          ${tile("Expirés", stats.expired, "expired")}
+        </div>
+        <div class="grid cols-2 mt-3">
+          <div class="card">
+            <div class="card-header"><h2>Nouvelles demandes</h2><a href="#clients" data-filter="pending" class="btn btn-sm">Tout voir</a></div>
+            ${miniList(pending.data.rows, "Aucune demande en attente.")}
+          </div>
+          <div class="card">
+            <div class="card-header"><h2>Expirent sous 7 jours</h2><a href="#clients" data-filter="expiring" class="btn btn-sm">Tout voir</a></div>
+            ${miniList(expiring.data.rows, "Aucun abonnement proche de l'expiration.")}
+          </div>
+        </div>`;
+      main.querySelectorAll("[data-filter]").forEach((a) => a.addEventListener("click", () => {
+        state.clientsQuery = { search: "", status: a.dataset.filter, page: 0 };
+      }));
+    }
+
+    function miniList(rows, emptyText) {
+      if (!rows.length) return `<p class="muted mb-0">${emptyText}</p>`;
+      return rows.map((c) => `
+        <div class="row-between" style="padding:.6rem 0;border-bottom:1px solid var(--border)">
+          <a href="#client/${c.store_id}" class="client-cell" style="color:inherit">
+            <div class="name">${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</div>
+            <div class="sub">${escapeHtml(c.store_name)} · ${escapeHtml(c.phone || "")}${c.state === "active" ? " · " + daysLabel(c.days_left) : " · inscrit le " + formatDate(c.created_at)}</div>
+          </a>
+          <div class="row">${contactButtons(c, true)}</div>
+        </div>`).join("");
+    }
+
+    function daysLabel(d) {
+      if (d === null || d === undefined) return "—";
+      if (d < 0) return "expiré";
+      return d === 0 ? "expire aujourd'hui" : `${d} j restants`;
+    }
+
+    function contactButtons(c, small) {
+      const sz = small ? "btn-sm btn-icon" : "";
+      const phone = c.phone;
+      const wa = c.whatsapp || c.phone;
+      const msg = `Bonjour ${c.first_name || ""}, ici l'équipe ${APP_NAME} concernant votre boutique « ${c.store_name || ""} ».`;
+      return `${phone ? `<a class="btn ${sz}" href="${telLink(phone)}" title="Appeler">${icon("phone")}${small ? "" : " Appeler"}</a>` : ""}
+              ${wa ? `<a class="btn btn-success ${sz}" href="${whatsappLink(wa, msg)}" target="_blank" rel="noopener" title="WhatsApp">${icon("whatsapp")}${small ? "" : " WhatsApp"}</a>` : ""}`;
+    }
+
+    /* ----------------------------- Clients ---------------------------------- */
+    async function renderClients() {
+      setActive("clients", "Clients");
+      const q = state.clientsQuery;
+      main.innerHTML = `
+        <div class="page-title"><h1>Clients</h1></div>
+        <div class="card">
+          <form class="filters" id="client-filters">
+            <input class="input" name="search" type="search" placeholder="Nom, email, téléphone, commerce…" value="${escapeHtml(q.search)}">
+            <select class="input" name="status">${STATUS_FILTERS.map(([v, l]) => `<option value="${v}" ${v === q.status ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <button class="btn" type="submit">${icon("search")} Rechercher</button>
+          </form>
+          <div id="clients-table"><div class="page-loader" style="min-height:160px"><div class="spinner"></div></div></div>
+        </div>`;
+      const form = document.getElementById("client-filters");
+      form.addEventListener("submit", (e) => { e.preventDefault(); const d = formData(form); state.clientsQuery = { search: d.search, status: d.status, page: 0 }; loadClients(); });
+      form.status.addEventListener("change", () => form.requestSubmit());
+      await loadClients();
+    }
+
+    async function loadClients() {
+      const q = state.clientsQuery;
+      const box = document.getElementById("clients-table");
+      try {
+        const { data, error } = await sb.rpc("admin_list_clients", {
+          p_search: q.search || null, p_status: q.status || null, p_limit: PAGE_SIZE, p_offset: q.page * PAGE_SIZE,
+        });
+        if (error) throw error;
+        if (!data.rows.length) { box.innerHTML = `<div class="empty">${icon("users")}Aucun client trouvé.</div>`; return; }
+        box.innerHTML = `
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>Client</th><th>Commerce</th><th>Téléphone</th><th>Plan</th><th>Statut</th><th>Début</th><th>Expiration</th><th class="text-right">Actions</th></tr></thead>
+            <tbody>${data.rows.map(clientRow).join("")}</tbody>
+          </table></div>
+          ${pagination(data.total, q.page, "clients")}`;
+        bindPagination(box, (p) => { state.clientsQuery.page = p; loadClients(); });
+        bindClientActions(box, data.rows, loadClients);
+      } catch (e) { handleError(e); box.innerHTML = '<div class="empty">Impossible de charger les clients.</div>'; }
+    }
+
+    function clientRow(c) {
+      return `<tr>
+        <td class="cell-main" data-label="Client"><a href="#client/${c.store_id}" class="client-cell" style="color:inherit">
+          <div class="name">${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</div><div class="sub">${escapeHtml(c.email)}</div></a></td>
+        <td data-label="Commerce">${escapeHtml(c.store_name)}</td>
+        <td data-label="Téléphone" class="nowrap">${escapeHtml(c.phone || "—")}</td>
+        <td data-label="Plan">${escapeHtml(c.plan_name || "—")}</td>
+        <td data-label="Statut">${stateBadge(c.state)}</td>
+        <td data-label="Début" class="nowrap">${formatDate(c.start_date)}</td>
+        <td data-label="Expiration" class="nowrap"><span>${formatDate(c.end_date)}${c.end_date ? `<div class="small muted">${daysLabel(c.days_left)}</div>` : ""}</span></td>
+        <td data-label=""><div class="actions">${actionButtons(c, true)}</div></td>
+      </tr>`;
+    }
+
+    // Boutons d'action selon l'état du compte.
+    function actionButtons(c, compact) {
+      const b = (act, label, cls = "") => `<button class="btn btn-sm ${cls}" data-act="${act}" data-store="${c.store_id}">${label}</button>`;
+      const out = [];
+      if (compact) out.push(`<a class="btn btn-sm" href="#client/${c.store_id}">${icon("eye")} Voir</a>`);
+      if (c.state === "pending" && !c.plan_id) out.push(b("activate", "Activer", "btn-primary"));
+      if (c.state === "suspended") out.push(b("reactivate", "Réactiver", "btn-primary"));
+      if (c.plan_id && c.state !== "suspended") out.push(b("extend", "Prolonger", c.state === "expired" ? "btn-primary" : ""));
+      if (c.plan_id) out.push(b("plan", "Changer le plan"));
+      if (!compact && c.plan_id) out.push(b("dates", "Modifier les dates"));
+      if (!compact) out.push(b("edit", `${icon("edit")} Modifier`));
+      if (c.state !== "suspended") out.push(b("suspend", "Suspendre", "btn-danger"));
+      out.push(`<a class="btn btn-sm" href="${getStoreUrl(c.store_id)}" target="_blank" rel="noopener" title="Ouvrir la boutique">${icon("external")}${compact ? "" : " Ouvrir la boutique"}</a>`);
+      return out.join("");
+    }
+
+    function bindClientActions(container, rows, onDone) {
+      container.querySelectorAll("[data-act]").forEach((btn) => btn.addEventListener("click", () => {
+        const c = rows.find((r) => r.store_id === btn.dataset.store);
+        const handlers = { activate: openActivate, suspend: doSuspend, reactivate: doReactivate,
+                           extend: openExtend, plan: openChangePlan, dates: openDates, edit: openEditClient };
+        handlers[btn.dataset.act](c, onDone);
+      }));
+    }
+
+    function pagination(total, page, key) {
+      const pages = Math.ceil(total / PAGE_SIZE);
+      if (pages <= 1) return `<p class="small muted mt-2 mb-0">${total} résultat(s)</p>`;
+      return `<div class="pagination"><span class="small muted">${total} résultats · page ${page + 1}/${pages}</span>
+        <button class="btn btn-sm" data-page="${page - 1}" ${page === 0 ? "disabled" : ""}>Précédent</button>
+        <button class="btn btn-sm" data-page="${page + 1}" ${page + 1 >= pages ? "disabled" : ""}>Suivant</button></div>`;
+    }
+    function bindPagination(container, go) {
+      container.querySelectorAll("[data-page]").forEach((b) => b.addEventListener("click", () => go(Number(b.dataset.page))));
+    }
+
+    /* ----------------------------- Actions (modales) ------------------------ */
+    function addDays(isoDate, days) {
+      const d = new Date(isoDate + "T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() + Number(days || 0));
+      return d.toISOString().slice(0, 10);
+    }
+    function planOptions(selected, onlyActive = false) {
+      return state.plans.filter((p) => !onlyActive || p.active || p.id === selected).map((p) =>
+        `<option value="${p.id}" data-days="${p.duration_days}" ${p.id === selected ? "selected" : ""}>${escapeHtml(p.name)} · ${formatPrice(p.price)} / ${p.duration_days} j${p.active ? "" : " (inactif)"}</option>`).join("");
+    }
+
+    async function openActivate(c, onDone) {
+      await loadPlans();
+      const today = state.status.today;
+      const first = state.plans.find((p) => p.active) || state.plans[0];
+      if (!first) return showToast("Créez d'abord une formule.", "error");
+      const modal = openModal({
+        title: "Activer le compte",
+        body: `<p class="muted">${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)} · ${escapeHtml(c.store_name)}</p>
+          <form id="activate-form">
+            <div class="field"><label>Formule</label><select class="input" name="plan_id">${planOptions(first.id, true)}</select></div>
+            <div class="form-grid cols-2">
+              <div class="field"><label>Date de début</label><input class="input" type="date" name="start_date" value="${today}" required></div>
+              <div class="field"><label>Date d'expiration</label><input class="input" type="date" name="end_date" value="${addDays(today, first.duration_days)}" required></div>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+              <button class="btn btn-primary" type="submit">Activer le compte</button></div>
+          </form>`,
+      });
+      const form = modal.querySelector("form");
+      const recompute = () => {
+        const days = form.plan_id.selectedOptions[0].dataset.days;
+        form.end_date.value = addDays(form.start_date.value || today, days);
+      };
+      form.plan_id.addEventListener("change", recompute);
+      form.start_date.addEventListener("change", recompute);
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = await sb.rpc("admin_activate", { p_store_id: c.store_id, p_plan_id: d.plan_id, p_start_date: d.start_date, p_end_date: d.end_date });
+            if (error) throw error;
+            closeModal(); showToast("Compte activé.", "success"); onDone(); refreshPendingCount();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    async function doSuspend(c, onDone) {
+      const modal = openModal({
+        title: "Suspendre le compte",
+        body: `<p>Le client ne pourra plus utiliser son tableau de bord et sa boutique sera indisponible.</p>
+          <form><div class="field"><label>Raison (visible par le client)</label>
+            <textarea class="input" name="reason" maxlength="500">Compte suspendu pour non-paiement.</textarea></div>
+            <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+              <button class="btn btn-danger-solid" type="submit">Suspendre</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const { reason } = formData(form);
+        closeModal();
+        if (!(await confirmAction(`Suspendre le compte de ${c.first_name} ${c.last_name} (${c.store_name}) ?`, { confirmText: "Suspendre" }))) return;
+        try {
+          const { error } = await sb.rpc("admin_suspend", { p_store_id: c.store_id, p_reason: reason });
+          if (error) throw error;
+          showToast("Compte suspendu.", "success"); onDone();
+        } catch (err) { handleError(err); }
+      });
+    }
+
+    async function doReactivate(c, onDone) {
+      if (!(await confirmAction(`Réactiver le compte de ${c.first_name} ${c.last_name} ?`, { confirmText: "Réactiver", danger: false }))) return;
+      try {
+        const { data, error } = await sb.rpc("admin_reactivate", { p_store_id: c.store_id });
+        if (error) throw error;
+        showToast(data === "expired" ? "Compte réactivé, mais l'abonnement est expiré : prolongez-le." : "Compte réactivé.",
+                  data === "expired" ? "info" : "success", 5000);
+        onDone();
+      } catch (err) { handleError(err); }
+    }
+
+    function openExtend(c, onDone) {
+      const base = c.end_date && c.days_left >= 0 ? c.end_date : state.status.today;
+      const modal = openModal({
+        title: "Prolonger l'abonnement",
+        body: `<p class="muted">Expiration actuelle : <strong>${formatDate(c.end_date)}</strong> (${daysLabel(c.days_left)})</p>
+          <form>
+            <div class="quick-days">${[30, 90, 180, 365].map((d) => `<button type="button" class="btn btn-sm" data-days="${d}">+${d} jours</button>`).join("")}</div>
+            <div class="field"><label>Nouvelle date d'expiration</label>
+              <input class="input" type="date" name="end_date" value="${addDays(base, 30)}" required></div>
+            <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+              <button class="btn btn-primary" type="submit">Prolonger</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      form.querySelectorAll("[data-days]").forEach((b) => b.addEventListener("click", () => { form.end_date.value = addDays(base, b.dataset.days); }));
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = await sb.rpc("admin_extend", { p_store_id: c.store_id, p_new_end_date: form.end_date.value });
+            if (error) throw error;
+            closeModal(); showToast("Abonnement prolongé.", "success"); onDone();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    async function openChangePlan(c, onDone) {
+      await loadPlans();
+      const modal = openModal({
+        title: "Changer le plan",
+        body: `<form><div class="field"><label>Nouvelle formule</label><select class="input" name="plan_id">${planOptions(c.plan_id, true)}</select>
+            <span class="hint">Les dates ne changent pas. Utilisez « Prolonger » si nécessaire.</span></div>
+          <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = await sb.rpc("admin_change_plan", { p_store_id: c.store_id, p_plan_id: form.plan_id.value });
+            if (error) throw error;
+            closeModal(); showToast("Formule modifiée.", "success"); onDone();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    function openDates(c, onDone) {
+      const modal = openModal({
+        title: "Modifier les dates",
+        body: `<form><div class="form-grid cols-2">
+            <div class="field"><label>Date de début</label><input class="input" type="date" name="start_date" value="${c.start_date || ""}" required></div>
+            <div class="field"><label>Date d'expiration</label><input class="input" type="date" name="end_date" value="${c.end_date || ""}" required></div></div>
+          <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = await sb.rpc("admin_set_dates", { p_store_id: c.store_id, p_start_date: d.start_date, p_end_date: d.end_date });
+            if (error) throw error;
+            closeModal(); showToast("Dates modifiées.", "success"); onDone();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    function openEditClient(c, onDone) {
+      const f = (name, label, value, type = "text") =>
+        `<div class="field"><label>${label}</label><input class="input" type="${type}" name="${name}" value="${escapeHtml(value || "")}"></div>`;
+      const modal = openModal({
+        title: "Modifier le client", size: "lg",
+        body: `<form><h3>Informations</h3><div class="form-grid cols-2">
+            ${f("first_name", "Prénom", c.first_name)}${f("last_name", "Nom", c.last_name)}
+            ${f("phone", "Téléphone", c.phone, "tel")}${f("whatsapp", "WhatsApp", c.whatsapp, "tel")}
+            ${f("city", "Ville", c.city)}${f("country", "Pays", c.country)}</div>
+          <h3>Commerce</h3><div class="form-grid cols-2">
+            ${f("store_name", "Nom du commerce", c.store_name)}${f("business_type", "Type de commerce", c.business_type)}
+            <div class="span-2">${f("address", "Adresse", c.address)}</div></div>
+          <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        if (!d.store_name) return showToast("Le nom du commerce est obligatoire.", "error");
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const p = await sb.from("profiles").update({
+              first_name: d.first_name, last_name: d.last_name, phone: d.phone || null,
+              whatsapp: d.whatsapp || null, city: d.city || null, country: d.country || null,
+            }).eq("id", c.user_id);
+            if (p.error) throw p.error;
+            const s = await sb.from("stores").update({
+              name: d.store_name, business_type: d.business_type || null, address: d.address || null,
+            }).eq("id", c.store_id);
+            if (s.error) throw s.error;
+            closeModal(); showToast("Client modifié.", "success"); onDone();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    /* ----------------------------- Fiche client ----------------------------- */
+    async function renderClient(storeId) {
+      setActive("clients", "Fiche client");
+      if (!UUID_RE.test(storeId)) { location.hash = "#clients"; return; }
+      const { data: store, error } = await sb.from("stores")
+        .select("*, owner:profiles!stores_owner_id_fkey(*), subscription:subscriptions(*, plan:plans(*))")
+        .eq("id", storeId).maybeSingle();
+      if (error) throw error;
+      if (!store) { main.innerHTML = '<div class="card empty">Client introuvable.</div>'; return; }
+      const sub = Array.isArray(store.subscription) ? store.subscription[0] : store.subscription;
+      const plan = sub && sub.plan;
+      const { data: stateValue } = await sb.rpc("store_state", { p_store_id: storeId });
+      const o = store.owner;
+      const daysLeft = sub && sub.end_date
+        ? Math.round((new Date(sub.end_date + "T00:00:00Z") - new Date(state.status.today + "T00:00:00Z")) / 86400000) : null;
+      // Même forme qu'une ligne de admin_list_clients, pour réutiliser les actions.
+      const c = {
+        user_id: o.id, first_name: o.first_name, last_name: o.last_name, email: o.email, phone: o.phone,
+        whatsapp: o.whatsapp, city: o.city, country: o.country, store_id: store.id, store_name: store.name,
+        business_type: store.business_type, address: store.address, plan_id: sub && sub.plan_id,
+        plan_name: plan && plan.name, start_date: sub && sub.start_date, end_date: sub && sub.end_date,
+        days_left: daysLeft, state: stateValue,
+      };
+      const url = getStoreUrl(store.id);
+      const dd = (label, value) => `<dt>${label}</dt><dd>${value || "—"}</dd>`;
+
+      main.innerHTML = `
+        <div class="page-title">
+          <div><a href="#clients" class="small">← Clients</a><h1>${escapeHtml(o.first_name)} ${escapeHtml(o.last_name)}</h1></div>
+          <div class="row">${contactButtons(c, false)}</div>
+        </div>
+        ${store.suspension_reason ? `<div class="alert alert-danger">Suspendu : ${escapeHtml(store.suspension_reason)}</div>` : ""}
+        <div class="card mb-2"><div class="row">${actionButtons(c, false)}</div></div>
+        <div class="grid cols-2">
+          <div class="card"><h2>Informations</h2><dl class="kv">
+            ${dd("Prénom", escapeHtml(o.first_name))}${dd("Nom", escapeHtml(o.last_name))}
+            ${dd("Email", `<a href="mailto:${escapeHtml(o.email)}">${escapeHtml(o.email)}</a>`)}
+            ${dd("Téléphone", escapeHtml(o.phone))}${dd("WhatsApp", escapeHtml(o.whatsapp))}
+            ${dd("Ville", escapeHtml([o.city, o.country].filter(Boolean).join(", ")))}
+            ${dd("Inscrit le", formatDateTime(o.created_at))}</dl></div>
+          <div class="card"><h2>Abonnement</h2><dl class="kv">
+            ${dd("Statut", stateBadge(stateValue))}${dd("Plan", escapeHtml(plan && plan.name))}
+            ${dd("Date début", formatDate(sub && sub.start_date))}${dd("Date expiration", formatDate(sub && sub.end_date))}
+            ${dd("Jours restants", sub && sub.end_date ? daysLabel(daysLeft) : "—")}</dl></div>
+          <div class="card"><h2>Commerce</h2><dl class="kv">
+            ${dd("Nom", escapeHtml(store.name))}${dd("Type", escapeHtml(store.business_type))}
+            ${dd("Adresse", escapeHtml(store.address))}</dl></div>
+          <div class="card"><h2>Boutique</h2><dl class="kv">
+            ${dd("store_id", `<code class="small">${store.id}</code>`)}
+            ${dd("URL publique", `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="small" style="word-break:break-all">${escapeHtml(url)}</a>`)}</dl>
+            <div class="row mt-2"><a class="btn btn-sm" href="${escapeHtml(url)}" target="_blank" rel="noopener">${icon("external")} Ouvrir</a>
+              <button class="btn btn-sm" id="copy-url">${icon("copy")} Copier l'URL</button></div></div>
+        </div>
+        <div class="grid cols-2 mt-2">
+          <div class="card"><div class="card-header"><h2>Notes internes</h2><span class="badge">Invisibles pour le client</span></div>
+            <form id="note-form" class="mb-2"><textarea class="input" name="content" maxlength="5000" placeholder="Ex. Paiement reçu le ${formatDate(state.status.today)}." required></textarea>
+              <div class="row mt-1" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" type="submit">Ajouter la note</button></div></form>
+            <div id="notes"></div></div>
+          <div class="card"><h2>Historique</h2><div id="history"></div></div>
+        </div>`;
+
+      bindClientActions(main, [c], () => renderClient(storeId));
+      document.getElementById("copy-url").onclick = () => copyStoreUrl(store.id);
+      const noteForm = document.getElementById("note-form");
+      noteForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const { content } = formData(noteForm);
+        if (!content) return;
+        await withBusy(noteForm.querySelector("button"), async () => {
+          try {
+            const { error } = await sb.from("admin_notes").insert({ target_user_id: o.id, store_id: store.id, content });
+            if (error) throw error;
+            noteForm.reset(); loadNotes(o.id);
+          } catch (err) { handleError(err); }
+        });
+      });
+      loadNotes(o.id);
+      loadHistory(store.id, o.id);
+    }
+
+    async function loadNotes(userId) {
+      const box = document.getElementById("notes");
+      try {
+        const { data, error } = await sb.from("admin_notes").select("*").eq("target_user_id", userId).order("created_at", { ascending: false });
+        if (error) throw error;
+        box.innerHTML = data.length ? data.map((n) => `<div class="note">${escapeHtml(n.content).replace(/\n/g, "<br>")}
+            <div class="meta"><span>${formatDateTime(n.created_at)}</span><button class="btn btn-ghost btn-sm" data-del="${n.id}">${icon("trash")}</button></div></div>`).join("")
+          : '<p class="muted mb-0">Aucune note.</p>';
+        box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
+          if (!(await confirmAction("Supprimer cette note ?", { confirmText: "Supprimer" }))) return;
+          const { error: err } = await sb.from("admin_notes").delete().eq("id", b.dataset.del);
+          if (err) return handleError(err);
+          loadNotes(userId);
+        }));
+      } catch (e) { handleError(e); }
+    }
+
+    async function loadHistory(storeId, userId) {
+      const box = document.getElementById("history");
+      try {
+        const { data, error } = await sb.from("audit_logs").select("*")
+          .or(`store_id.eq.${storeId},target_user_id.eq.${userId}`)
+          .order("created_at", { ascending: false }).limit(30);
+        if (error) throw error;
+        box.innerHTML = data.length ? data.map(logLine).join("") : '<p class="muted mb-0">Aucun historique.</p>';
+      } catch (e) { handleError(e); }
+    }
+
+    function logDetails(l) {
+      const d = l.details || {};
+      if (l.action === "activate") return `${escapeHtml(d.plan)} · ${formatDate(d.start_date)} → ${formatDate(d.end_date)}`;
+      if (l.action === "extend") return `${formatDate(d.old_end_date)} → ${formatDate(d.new_end_date)}`;
+      if (l.action === "set_dates") return `${formatDate(d.new_start_date)} → ${formatDate(d.new_end_date)}`;
+      if (l.action === "change_plan") return `${escapeHtml(d.old_plan || "—")} → ${escapeHtml(d.new_plan)}`;
+      if (l.action === "suspend") return escapeHtml(d.reason || "");
+      if (l.action.startsWith("delete_")) return escapeHtml(d.name || "");
+      if (l.action === "signup") return escapeHtml(d.business_name || "");
+      return "";
+    }
+    function logLine(l) {
+      return `<div class="log-line"><time>${formatDateTime(l.created_at)}</time>
+        <div><strong>${escapeHtml(ACTION_LABELS[l.action] || l.action)}</strong>
+        ${l.store ? ` · <a href="#client/${l.store_id}">${escapeHtml(l.store.name)}</a>` : ""}
+        <div class="small muted">${logDetails(l)}${l.actor ? " · par " + escapeHtml(l.actor.first_name + " " + l.actor.last_name) : ""}</div></div></div>`;
+    }
+
+    /* ----------------------------- Boutiques -------------------------------- */
+    async function renderStores() {
+      setActive("stores", "Boutiques");
+      main.innerHTML = `<div class="page-title"><h1>Boutiques</h1></div>
+        <div class="card"><form class="filters" id="store-filters">
+          <input class="input" type="search" name="search" placeholder="Nom de la boutique, propriétaire…">
+          <button class="btn" type="submit">${icon("search")} Rechercher</button></form>
+          <div id="stores-table"></div></div>`;
+      let page = 0, search = "";
+      const box = document.getElementById("stores-table");
+      async function load() {
+        box.innerHTML = '<div class="page-loader" style="min-height:160px"><div class="spinner"></div></div>';
+        try {
+          const { data, error } = await sb.rpc("admin_list_clients", { p_search: search || null, p_status: null, p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE });
+          if (error) throw error;
+          if (!data.rows.length) { box.innerHTML = `<div class="empty">${icon("store")}Aucune boutique.</div>`; return; }
+          box.innerHTML = `<div class="table-wrap"><table class="table">
+            <thead><tr><th>Boutique</th><th>Propriétaire</th><th>URL</th><th>Statut</th><th>Abonnement</th><th class="text-right">Actions</th></tr></thead>
+            <tbody>${data.rows.map((c) => `<tr>
+              <td class="cell-main" data-label="Boutique">${escapeHtml(c.store_name)}</td>
+              <td data-label="Propriétaire">${escapeHtml(c.first_name + " " + c.last_name)}</td>
+              <td data-label="URL"><span class="small muted" style="word-break:break-all">shop.html?store=${c.store_id.slice(0, 8)}…</span></td>
+              <td data-label="Statut">${stateBadge(c.state)}</td>
+              <td data-label="Abonnement"><span>${escapeHtml(c.plan_name || "—")}${c.end_date ? `<div class="small muted">jusqu'au ${formatDate(c.end_date)}</div>` : ""}</span></td>
+              <td data-label=""><div class="actions">
+                <a class="btn btn-sm" href="#client/${c.store_id}">${icon("eye")} Voir</a>
+                <a class="btn btn-sm" href="${getStoreUrl(c.store_id)}" target="_blank" rel="noopener">${icon("external")} Ouvrir</a>
+                <button class="btn btn-sm" data-copy="${c.store_id}">${icon("copy")} Copier l'URL</button></div></td></tr>`).join("")}</tbody>
+            </table></div>${pagination(data.total, page)}`;
+          box.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => copyStoreUrl(b.dataset.copy)));
+          bindPagination(box, (p) => { page = p; load(); });
+        } catch (e) { handleError(e); }
+      }
+      document.getElementById("store-filters").addEventListener("submit", (e) => { e.preventDefault(); search = formData(e.target).search; page = 0; load(); });
+      load();
+    }
+
+    /* ----------------------------- Formules --------------------------------- */
+    async function renderPlans() {
+      setActive("plans", "Formules");
+      const plans = await loadPlans();
+      main.innerHTML = `
+        <div class="page-title"><h1>Formules</h1><button class="btn btn-primary" id="new-plan">${icon("plus")} Nouvelle formule</button></div>
+        <div class="card">${plans.length ? `<div class="table-wrap"><table class="table">
+          <thead><tr><th>Nom</th><th>Prix</th><th>Durée</th><th>Produits</th><th>Catégories</th><th>Statut</th><th class="text-right">Actions</th></tr></thead>
+          <tbody>${plans.map((p) => `<tr>
+            <td class="cell-main" data-label="Nom"><span>${escapeHtml(p.name)}<div class="small muted">${(p.features || []).map((f) => FEATURES[f] || escapeHtml(f)).join(", ")}</div></span></td>
+            <td data-label="Prix" class="nowrap">${formatPrice(p.price)}</td>
+            <td data-label="Durée">${p.duration_days} jours</td>
+            <td data-label="Produits">${p.max_products ?? "Illimité"}</td>
+            <td data-label="Catégories">${p.max_categories ?? "Illimité"}</td>
+            <td data-label="Statut">${p.active ? '<span class="badge badge-success">Active</span>' : '<span class="badge">Inactive</span>'}</td>
+            <td data-label=""><div class="actions"><button class="btn btn-sm" data-edit="${p.id}">${icon("edit")} Modifier</button>
+              <button class="btn btn-sm btn-danger" data-del="${p.id}">${icon("trash")}</button></div></td></tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">${icon("card")}Aucune formule.</div>`}</div>`;
+      document.getElementById("new-plan").onclick = () => openPlan(null);
+      main.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => openPlan(plans.find((p) => p.id === b.dataset.edit))));
+      main.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
+        const p = plans.find((x) => x.id === b.dataset.del);
+        if (!(await confirmAction(`Supprimer la formule « ${p.name} » ?`, { confirmText: "Supprimer" }))) return;
+        const { error } = await sb.from("plans").delete().eq("id", p.id);
+        if (error) {
+          console.error(error);
+          return showToast(error.code === "23503" ? "Des clients utilisent cette formule : désactivez-la plutôt." : friendlyError(error), "error", 5000);
+        }
+        showToast("Formule supprimée.", "success"); renderPlans();
+      }));
+    }
+
+    function openPlan(p) {
+      const v = p || { name: "", description: "", price: 0, duration_days: 30, max_products: 100, max_categories: 20, features: ["orders", "whatsapp"], active: true, sort_order: state.plans.length + 1 };
+      const modal = openModal({
+        title: p ? "Modifier la formule" : "Nouvelle formule", size: "lg",
+        body: `<form><div class="form-grid cols-2">
+            <div class="field"><label>Nom *</label><input class="input" name="name" value="${escapeHtml(v.name)}" required maxlength="80"></div>
+            <div class="field"><label>Prix (DA) *</label><input class="input" name="price" type="number" min="0" step="0.01" value="${v.price}" required></div>
+            <div class="field span-2"><label>Description</label><input class="input" name="description" value="${escapeHtml(v.description || "")}" maxlength="1000"></div>
+            <div class="field"><label>Durée (jours) *</label><input class="input" name="duration_days" type="number" min="1" value="${v.duration_days}" required></div>
+            <div class="field"><label>Ordre d'affichage</label><input class="input" name="sort_order" type="number" value="${v.sort_order}"></div>
+            <div class="field"><label>Produits max</label><input class="input" name="max_products" type="number" min="0" value="${v.max_products ?? ""}" placeholder="Vide = illimité"></div>
+            <div class="field"><label>Catégories max</label><input class="input" name="max_categories" type="number" min="0" value="${v.max_categories ?? ""}" placeholder="Vide = illimité"></div></div>
+          <div class="field"><label>Fonctionnalités</label>${Object.entries(FEATURES).map(([k, l]) =>
+            `<label class="checkbox"><input type="checkbox" data-feature="${k}" ${(v.features || []).includes(k) ? "checked" : ""}> ${l}</label>`).join("")}</div>
+          <label class="checkbox"><input type="checkbox" name="active" ${v.active ? "checked" : ""}> Formule active (proposée aux clients)</label>
+          <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        if (!d.name) return showToast("Le nom est obligatoire.", "error");
+        const row = {
+          name: d.name, description: d.description || null, price: Number(d.price || 0),
+          duration_days: Number(d.duration_days || 30), sort_order: Number(d.sort_order || 0),
+          max_products: d.max_products === "" ? null : Number(d.max_products),
+          max_categories: d.max_categories === "" ? null : Number(d.max_categories),
+          features: [...form.querySelectorAll("[data-feature]:checked")].map((c) => c.dataset.feature),
+          active: d.active,
+        };
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = p ? await sb.from("plans").update(row).eq("id", p.id) : await sb.from("plans").insert(row);
+            if (error) throw error;
+            closeModal(); showToast("Formule enregistrée.", "success"); renderPlans();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    /* ----------------------------- Journal ---------------------------------- */
+    async function renderLogs() {
+      setActive("logs", "Journal");
+      const from = state.logsPage * 50;
+      const { data, error, count } = await sb.from("audit_logs")
+        .select("*, store:stores(name), actor:profiles!audit_logs_actor_id_fkey(first_name, last_name)", { count: "exact" })
+        .order("created_at", { ascending: false }).range(from, from + 49);
+      if (error) throw error;
+      const pages = Math.ceil((count || 0) / 50);
+      main.innerHTML = `<div class="page-title"><h1>Journal</h1></div>
+        <div class="card">${data.length ? data.map(logLine).join("") : '<p class="muted mb-0">Journal vide.</p>'}
+        ${pages > 1 ? `<div class="pagination"><span class="small muted">page ${state.logsPage + 1}/${pages}</span>
+          <button class="btn btn-sm" id="logs-prev" ${state.logsPage === 0 ? "disabled" : ""}>Précédent</button>
+          <button class="btn btn-sm" id="logs-next" ${state.logsPage + 1 >= pages ? "disabled" : ""}>Suivant</button></div>` : ""}</div>`;
+      const prev = document.getElementById("logs-prev"), next = document.getElementById("logs-next");
+      if (prev) prev.onclick = () => { state.logsPage--; renderLogs(); };
+      if (next) next.onclick = () => { state.logsPage++; renderLogs(); };
+    }
+
+    /* ----------------------------- Démarrage -------------------------------- */
+    (async function init() {
+      try {
+        const status = await checkAdmin();
+        if (!status) return;
+        state.status = status;
+        renderShell();
+        const user = await getCurrentUser();
+        document.getElementById("admin-email").textContent = user.email;
+        window.addEventListener("hashchange", router);
+        await loadPlans();
+        router();
+      } catch (e) {
+        console.error(e);
+        main.innerHTML = '<div class="card empty">Une erreur est survenue.</div>';
+      }
+    })();
+  </script>
+</body>
+</html>
