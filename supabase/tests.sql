@@ -534,42 +534,83 @@ begin
 end $$;
 
 -- =============================================================================
--- 10. SUPPRESSION DÉFINITIVE D'UN CLIENT (corbeille admin)
+-- 10. CORBEILLE : mise à la corbeille, restauration, purge (manuelle et après 30 jours)
 -- =============================================================================
 do $$
-declare v_store uuid := tests.store('A'); n int;
+declare v_store uuid := tests.store('A'); n int; v jsonb;
 begin
   perform tests.login('B');
   begin
-    perform public.admin_delete_client(v_store);
-    perform tests.check('suppression : refusée à un client', false);
+    perform public.admin_trash_store(v_store);
+    perform tests.check('corbeille : refusée à un client', false);
   exception when others then
-    perform tests.check('suppression : refusée à un client', sqlerrm = 'FORBIDDEN', sqlerrm);
+    perform tests.check('corbeille : refusée à un client', sqlerrm = 'FORBIDDEN', sqlerrm);
+  end;
+  begin
+    perform public.purge_store(v_store);
+    perform tests.check('purge interne non appelable par un client', false);
+  exception when others then
+    perform tests.check('purge interne non appelable par un client', true, sqlerrm);
   end;
   perform tests.logout();
 
   perform tests.login('ADMIN');
   begin
-    perform public.admin_delete_client(v_store);
-    perform tests.check('suppression : refusée si le compte n''est pas suspendu', false);
+    perform public.admin_trash_store(v_store);
+    perform tests.check('corbeille : refusée si le compte n''est pas suspendu', false);
   exception when others then
-    perform tests.check('suppression : refusée si le compte n''est pas suspendu', sqlerrm = 'NOT_SUSPENDED', sqlerrm);
+    perform tests.check('corbeille : refusée si le compte n''est pas suspendu', sqlerrm = 'NOT_SUSPENDED', sqlerrm);
   end;
   perform public.admin_suspend(v_store, 'test');
-  perform public.admin_delete_client(v_store);
+  perform public.admin_trash_store(v_store);
+  v := public.admin_list_trash();
+  perform tests.check('corbeille : listée, cachée des clients',
+    jsonb_array_length(v) = 1
+    and not exists (select 1 from jsonb_array_elements(public.admin_list_clients(null, null, 100, 0) -> 'rows') r
+                     where r ->> 'store_id' = v_store::text), v::text);
+  perform public.admin_restore_store(v_store);
+  perform tests.check('corbeille : restaurée (toujours suspendue)',
+    jsonb_array_length(public.admin_list_trash()) = 0 and public.store_state(v_store) = 'suspended');
+  perform public.admin_trash_store(v_store);
   perform tests.logout();
 
+  -- 31 jours plus tard : la tâche quotidienne purge.
+  update public.stores set deleted_at = now() - interval '31 days' where id = v_store;
+  v := public.run_daily_subscription_jobs();
   select (select count(*) from auth.users where id = tests.uid('A'))
        + (select count(*) from public.profiles where id = tests.uid('A'))
        + (select count(*) from public.stores where id = v_store)
        + (select count(*) from public.products where store_id = v_store)
        + (select count(*) from public.orders where store_id = v_store)
        + (select count(*) from public.subscriptions where store_id = v_store) into n;
-  perform tests.check('suppression : compte, boutique, produits, commandes effacés', n = 0, n::text);
-  perform tests.check('suppression : tracée dans le journal',
+  perform tests.check('purge auto après 30 j : compte, boutique, produits, commandes effacés',
+    n = 0 and (v ->> 'purged')::int = 1, n::text || ' ' || v::text);
+  perform tests.check('purge : tracée dans le journal',
     exists (select 1 from public.audit_logs where action = 'delete_client' and details ->> 'email' = 'clienta@test.local'));
-  perform tests.check('suppression : les autres boutiques sont intactes',
+  perform tests.check('purge : les autres boutiques sont intactes',
     exists (select 1 from public.stores where id = tests.store('B')));
+end $$;
+
+do $$
+declare v_store uuid := tests.store('ADMIN'); v text;
+begin
+  perform tests.login('ADMIN');
+  perform public.admin_suspend(v_store, 'test');
+  begin
+    perform public.admin_purge_store(v_store);
+    perform tests.check('purge manuelle : refusée hors corbeille', false);
+  exception when others then
+    perform tests.check('purge manuelle : refusée hors corbeille', sqlerrm = 'NOT_IN_TRASH', sqlerrm);
+  end;
+  perform public.admin_trash_store(v_store);
+  v := public.admin_purge_store(v_store);
+  perform tests.check('boutique d''un admin : seule la boutique part, le compte admin reste',
+    v = 'store'
+    and not exists (select 1 from public.stores where id = v_store)
+    and exists (select 1 from public.profiles where id = tests.uid('ADMIN') and role = 'admin'));
+  perform tests.check('admin sans boutique : statut lisible, toujours admin',
+    public.my_account_status() ->> 'role' = 'admin' and public.my_account_status() ->> 'state' = 'no_store');
+  perform tests.logout();
 end $$;
 
 -- =============================================================================

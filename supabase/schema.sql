@@ -77,6 +77,8 @@ create table if not exists public.stores (
   updated_at         timestamptz not null default now()
 );
 create index if not exists stores_status_idx on public.stores (status);
+-- Corbeille admin : boutique supprimée = deleted_at renseigné ; purge définitive après 30 jours.
+alter table public.stores add column if not exists deleted_at timestamptz;
 
 -- ---------- store_settings : apparence et paramètres (1-1 avec stores) -------
 create table if not exists public.store_settings (
@@ -552,6 +554,7 @@ begin
        or new.owner_id is distinct from old.owner_id
        or new.status is distinct from old.status
        or new.suspension_reason is distinct from old.suspension_reason
+       or new.deleted_at is distinct from old.deleted_at
        or new.slug is distinct from old.slug
        or new.created_at is distinct from old.created_at then
       raise exception 'FORBIDDEN_FIELD' using errcode = '42501';
@@ -1064,27 +1067,99 @@ $$;
 
 -- Supprimer définitivement un client SUSPENDU : compte de connexion, profil, boutique,
 -- produits, commandes… (tout part en cascade depuis auth.users). Irréversible.
+-- Si le propriétaire est un ADMIN, seule sa boutique est supprimée : le compte admin reste.
 -- Les images de la boutique sont effacées avant par admin.html (API Storage).
-create or replace function public.admin_delete_client(p_store_id uuid)
+-- ---------- CORBEILLE (admin) -------------------------------------------------
+-- 1) Un compte SUSPENDU peut être mis à la corbeille (restaurable pendant 30 jours).
+-- 2) Purge définitive : à la main depuis la corbeille, ou automatiquement après 30 jours
+--    (run_daily_subscription_jobs). Client : compte + boutique + tout le reste (cascade
+--    depuis auth.users). Admin : seule sa boutique est supprimée, le compte admin reste.
+--    Les images sont effacées par admin.html via l'API Storage (impossible en SQL).
+drop function if exists public.admin_delete_client(uuid);
+
+create or replace function public.admin_trash_store(p_store_id uuid)
 returns void
 language plpgsql security definer set search_path = public
 as $$
 declare
   v_store public.stores%rowtype;
-  v_owner public.profiles%rowtype;
 begin
   perform public.assert_admin();
   select * into v_store from public.stores where id = p_store_id for update;
   if not found then raise exception 'STORE_NOT_FOUND' using errcode = 'P0001'; end if;
   if v_store.status <> 'suspended' then raise exception 'NOT_SUSPENDED' using errcode = 'P0001'; end if;
-  select * into v_owner from public.profiles where id = v_store.owner_id;
-  if v_owner.role = 'admin' then raise exception 'FORBIDDEN' using errcode = '42501'; end if;
+  if v_store.deleted_at is not null then return; end if;
+  update public.stores set deleted_at = now() where id = p_store_id;
+  perform public.write_audit('trash', v_store.owner_id, p_store_id, jsonb_build_object('name', v_store.name));
+end;
+$$;
 
+create or replace function public.admin_restore_store(p_store_id uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_store public.stores%rowtype;
+begin
+  perform public.assert_admin();
+  update public.stores set deleted_at = null
+   where id = p_store_id and deleted_at is not null returning * into v_store;
+  if not found then raise exception 'STORE_NOT_FOUND' using errcode = 'P0001'; end if;
+  perform public.write_audit('restore', v_store.owner_id, p_store_id, jsonb_build_object('name', v_store.name));
+end;
+$$;
+
+-- Interne (non exécutable depuis le navigateur).
+create or replace function public.purge_store(p_store_id uuid)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_store public.stores%rowtype;
+  v_owner public.profiles%rowtype;
+  v_details jsonb;
+begin
+  select * into v_store from public.stores where id = p_store_id and deleted_at is not null for update;
+  if not found then raise exception 'NOT_IN_TRASH' using errcode = 'P0001'; end if;
+  select * into v_owner from public.profiles where id = v_store.owner_id;
+  v_details := jsonb_build_object('name', v_store.name, 'email', v_owner.email,
+    'owner', trim(coalesce(v_owner.first_name, '') || ' ' || coalesce(v_owner.last_name, '')));
   -- Le journal garde une trace (store_id / target_user_id passeront à null).
-  perform public.write_audit('delete_client', v_owner.id, p_store_id, jsonb_build_object(
-    'name', v_store.name, 'email', v_owner.email,
-    'owner', trim(coalesce(v_owner.first_name, '') || ' ' || coalesce(v_owner.last_name, ''))));
+  if v_owner.role = 'admin' then
+    perform public.write_audit('delete_store', v_owner.id, p_store_id, v_details);
+    delete from public.stores where id = p_store_id;
+    return 'store';
+  end if;
+  perform public.write_audit('delete_client', v_owner.id, p_store_id, v_details);
   delete from auth.users where id = v_owner.id;
+  return 'client';
+end;
+$$;
+
+create or replace function public.admin_purge_store(p_store_id uuid)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+begin
+  perform public.assert_admin();
+  return public.purge_store(p_store_id);
+end;
+$$;
+
+create or replace function public.admin_list_trash()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  perform public.assert_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'store_id', s.id, 'store_name', s.name, 'deleted_at', s.deleted_at,
+      'purge_on', (s.deleted_at + interval '30 days')::date,
+      'user_id', p.id, 'first_name', p.first_name, 'last_name', p.last_name,
+      'email', p.email, 'role', p.role) order by s.deleted_at desc)
+      from public.stores s join public.profiles p on p.id = s.owner_id
+     where s.deleted_at is not null), '[]'::jsonb);
 end;
 $$;
 
@@ -1194,6 +1269,7 @@ begin
       from public.stores s
       join public.profiles p on p.id = s.owner_id and p.role = 'client'
       left join public.subscriptions sub on sub.store_id = s.id
+     where s.deleted_at is null
   )
   select jsonb_build_object(
     'total_clients', count(*),
@@ -1211,9 +1287,10 @@ $$;
 
 -- Liste des clients, paginée et filtrée côté base (jamais "tout charger").
 -- p_status : null | pending | active | suspended | expired | expiring
+drop function if exists public.admin_list_clients(text, text, int, int);
 create or replace function public.admin_list_clients(
   p_search text default null, p_status text default null,
-  p_limit int default 25, p_offset int default 0)
+  p_limit int default 25, p_offset int default 0, p_include_admins boolean default false)
 returns jsonb
 language plpgsql stable security definer set search_path = public
 as $$
@@ -1236,7 +1313,8 @@ begin
     join public.stores s on s.owner_id = p.id
     left join public.subscriptions sub on sub.store_id = s.id
     left join public.plans pl on pl.id = sub.plan_id
-    where p.role = 'client'
+    where (p.role = 'client' or p_include_admins)
+      and s.deleted_at is null
       and (v_search is null
            or p.first_name ilike '%' || v_search || '%'
            or p.last_name  ilike '%' || v_search || '%'
@@ -1270,8 +1348,15 @@ as $$
 declare
   v_expired int := 0;
   v_reminded int := 0;
+  v_purged int := 0;
   r record;
 begin
+  -- Corbeille : purge définitive après 30 jours.
+  for r in select id from public.stores where deleted_at < now() - interval '30 days' loop
+    perform public.purge_store(r.id);
+    v_purged := v_purged + 1;
+  end loop;
+
   for r in
     update public.subscriptions
        set status = 'expired'
@@ -1301,7 +1386,7 @@ begin
       'Contactez-nous pour renouveler votre abonnement.');
   end loop;
 
-  return jsonb_build_object('expired', v_expired, 'reminders', v_reminded);
+  return jsonb_build_object('expired', v_expired, 'reminders', v_reminded, 'purged', v_purged);
 end;
 $$;
 
@@ -1507,12 +1592,15 @@ grant execute on function public.store_dashboard_stats()               to authen
 grant execute on function public.admin_activate(uuid, uuid, date, date) to authenticated;
 grant execute on function public.admin_suspend(uuid, text)             to authenticated;
 grant execute on function public.admin_reactivate(uuid)                to authenticated;
-grant execute on function public.admin_delete_client(uuid)             to authenticated;
+grant execute on function public.admin_trash_store(uuid)               to authenticated;
+grant execute on function public.admin_restore_store(uuid)             to authenticated;
+grant execute on function public.admin_purge_store(uuid)               to authenticated;
+grant execute on function public.admin_list_trash()                    to authenticated;
 grant execute on function public.admin_extend(uuid, int, date)         to authenticated;
 grant execute on function public.admin_set_dates(uuid, date, date)     to authenticated;
 grant execute on function public.admin_change_plan(uuid, uuid)         to authenticated;
 grant execute on function public.admin_stats()                         to authenticated;
-grant execute on function public.admin_list_clients(text, text, int, int) to authenticated;
+grant execute on function public.admin_list_clients(text, text, int, int, boolean) to authenticated;
 
 -- promote_to_admin, run_daily_subscription_jobs, write_audit, notify_owner,
 -- assert_admin, handle_new_user… : NON exécutables depuis le navigateur.

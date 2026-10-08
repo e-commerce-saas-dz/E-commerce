@@ -248,6 +248,7 @@ function friendlyError(error) {
   if (msg.includes("Could not find the function") || msg.includes("PGRST202"))
     return "Mise à jour de la base manquante : exécutez le dernier fichier SQL dans Supabase.";
   if (msg.includes("NOT_SUSPENDED")) return "Suspendez d'abord ce compte avant de le supprimer.";
+  if (msg.includes("NOT_IN_TRASH")) return "Mettez d'abord cet élément à la corbeille.";
   if (msg.includes("FORBIDDEN") || msg.includes("row-level security") || msg.includes("permission denied"))
     return "Action non autorisée.";
   if (msg.includes("Invalid login credentials")) return "Email ou mot de passe incorrect.";

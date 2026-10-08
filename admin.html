@@ -66,6 +66,7 @@
       ["stores", "store", "Boutiques"],
       ["plans", "card", "Formules"],
       ["logs", "file", "Journal"],
+      ["trash", "trash", "Corbeille"],
     ];
     const FEATURES = {
       orders: "Commandes", whatsapp: "Commande WhatsApp", stats: "Statistiques",
@@ -78,7 +79,8 @@
     const ACTION_LABELS = {
       signup: "Inscription", activate: "Activation", suspend: "Suspension", reactivate: "Réactivation",
       change_plan: "Changement de plan", extend: "Prolongation", set_dates: "Modification des dates",
-      expire: "Expiration automatique", promote_admin: "Promotion admin", delete_client: "Suppression client",
+      expire: "Expiration automatique", promote_admin: "Promotion admin", trash: "Mise à la corbeille", restore: "Restauration",
+      delete_client: "Suppression définitive (client)", delete_store: "Suppression définitive (boutique)",
       delete_product: "Suppression produit", delete_categorie: "Suppression catégorie",
     };
 
@@ -114,6 +116,7 @@
         else if (route === "stores") await renderStores();
         else if (route === "plans") await renderPlans();
         else if (route === "logs") await renderLogs();
+        else if (route === "trash") await renderTrash();
         else await renderOverview();
       } catch (e) {
         console.error(e);
@@ -274,7 +277,7 @@
       if (!compact && c.plan_id) out.push(b("dates", "Modifier les dates"));
       if (!compact) out.push(b("edit", `${icon("edit")} Modifier`));
       if (c.state !== "suspended") out.push(b("suspend", "Suspendre", "btn-danger"));
-      if (c.state === "suspended" && c.role !== "admin" && c.user_id !== state.status.user_id) out.push(`<button class="btn btn-sm btn-danger" data-act="delete" data-store="${c.store_id}" title="Supprimer définitivement">${icon("trash")}${compact ? "" : " Supprimer"}</button>`);
+      if (c.state === "suspended") out.push(`<button class="btn btn-sm btn-danger" data-act="trash" data-store="${c.store_id}" title="Mettre à la corbeille">${icon("trash")}${compact ? "" : " Supprimer"}</button>`);
       out.push(`<a class="btn btn-sm" href="${getStoreUrl(c.store_id)}" target="_blank" rel="noopener" title="Ouvrir la boutique">${icon("external")}${compact ? "" : " Ouvrir la boutique"}</a>`);
       return out.join("");
     }
@@ -284,7 +287,7 @@
         const c = rows.find((r) => r.store_id === btn.dataset.store);
         const handlers = { activate: openActivate, suspend: doSuspend, reactivate: doReactivate,
                            extend: openExtend, plan: openChangePlan, dates: openDates, edit: openEditClient,
-                           delete: doDeleteClient };
+                           trash: doTrash };
         handlers[btn.dataset.act](c, onDone);
       }));
     }
@@ -372,21 +375,77 @@
       });
     }
 
-    // Suppression définitive d'un client suspendu (compte, boutique, produits, commandes, images).
-    async function doDeleteClient(c, onDone) {
-      if (!(await confirmAction(`Supprimer définitivement ${c.first_name} ${c.last_name} (${c.store_name}) ? Son compte, sa boutique, ses produits, ses commandes et ses images seront effacés. Cette action est irréversible.`,
-        { confirmText: "Supprimer définitivement" }))) return;
+    // Mise à la corbeille (restaurable 30 jours) d'un compte suspendu.
+    async function doTrash(c, onDone) {
+      const isAdmin = c.role === "admin" || c.user_id === state.status.user_id;
+      const what = isAdmin ? `la boutique « ${c.store_name} » (votre compte admin est conservé)`
+                           : `${c.first_name} ${c.last_name} (${c.store_name})`;
+      if (!(await confirmAction(`Mettre ${what} à la corbeille ? Restauration possible pendant 30 jours, puis suppression définitive automatique.`,
+        { confirmText: "Mettre à la corbeille" }))) return;
       try {
-        // Images d'abord (l'API Storage est la seule façon de les effacer) ; best effort.
-        for (const bucket of ["logos", "banners", "products"]) {
-          const { data: files } = await sb.storage.from(bucket).list(c.store_id, { limit: 1000 });
-          if (files && files.length) await sb.storage.from(bucket).remove(files.map((f) => `${c.store_id}/${f.name}`));
-        }
-        const { error } = await sb.rpc("admin_delete_client", { p_store_id: c.store_id });
+        const { error } = await sb.rpc("admin_trash_store", { p_store_id: c.store_id });
         if (error) throw error;
-        showToast("Client supprimé.", "success");
-        if (location.hash.startsWith("#client/")) location.hash = "#clients"; else onDone();
+        showToast("Déplacé dans la corbeille.", "success");
+        if (location.hash.startsWith("#client/")) location.hash = "#trash"; else onDone();
       } catch (err) { handleError(err); }
+    }
+
+    // Purge définitive : images (API Storage) puis base de données.
+    async function purgeStore(storeId) {
+      for (const bucket of ["logos", "banners", "products"]) {
+        const { data: files } = await sb.storage.from(bucket).list(storeId, { limit: 1000 });
+        if (files && files.length) await sb.storage.from(bucket).remove(files.map((f) => `${storeId}/${f.name}`));
+      }
+      const { error } = await sb.rpc("admin_purge_store", { p_store_id: storeId });
+      if (error) throw error;
+    }
+
+    /* ----------------------------- Corbeille -------------------------------- */
+    async function renderTrash() {
+      setActive("trash", "Corbeille");
+      const { data: rows, error } = await sb.rpc("admin_list_trash");
+      if (error) throw error;
+      const label = (r) => r.role === "admin" ? `${escapeHtml(r.store_name)} <span class="badge">boutique admin</span>` : escapeHtml(r.store_name);
+      main.innerHTML = `<div class="page-title"><h1>Corbeille</h1></div>
+        <p class="muted">Les éléments sont supprimés définitivement 30 jours après leur mise à la corbeille.</p>
+        <div class="card">${!rows.length ? `<div class="empty">${icon("trash")}La corbeille est vide.</div>` : `
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>Boutique</th><th>Propriétaire</th><th>Supprimé le</th><th>Suppression définitive</th><th class="text-right">Actions</th></tr></thead>
+            <tbody>${rows.map((r) => `<tr>
+              <td class="cell-main" data-label="Boutique">${label(r)}</td>
+              <td data-label="Propriétaire"><span>${escapeHtml(r.first_name + " " + r.last_name)}<div class="small muted">${escapeHtml(r.email)}</div></span></td>
+              <td data-label="Supprimé le">${formatDate(r.deleted_at)}</td>
+              <td data-label="Suppression définitive">${formatDate(r.purge_on)}</td>
+              <td data-label=""><div class="actions">
+                <button class="btn btn-sm btn-primary" data-restore="${r.store_id}">Restaurer</button>
+                <button class="btn btn-sm btn-danger" data-purge="${r.store_id}">${icon("trash")} Supprimer définitivement</button></div></td></tr>`).join("")}</tbody>
+          </table></div>`}</div>`;
+      main.querySelectorAll("[data-restore]").forEach((b) => b.addEventListener("click", async () => {
+        try {
+          const { error } = await sb.rpc("admin_restore_store", { p_store_id: b.dataset.restore });
+          if (error) throw error;
+          showToast("Restauré. Le compte reste suspendu : réactivez-le depuis sa fiche.", "success", 5000);
+          renderTrash();
+        } catch (err) { handleError(err); }
+      }));
+      main.querySelectorAll("[data-purge]").forEach((b) => b.addEventListener("click", async () => {
+        const r = rows.find((x) => x.store_id === b.dataset.purge);
+        const what = r.role === "admin" ? `la boutique « ${r.store_name} » (votre compte admin est conservé)`
+                                        : `${r.first_name} ${r.last_name} : compte, boutique, produits, commandes et images`;
+        if (!(await confirmAction(`Supprimer définitivement ${what} ? Cette action est irréversible.`, { confirmText: "Supprimer définitivement" }))) return;
+        try { await purgeStore(r.store_id); showToast("Supprimé définitivement.", "success"); renderTrash(); }
+        catch (err) { handleError(err); }
+      }));
+    }
+
+    // À l'ouverture de l'admin : purge des éléments de plus de 30 jours, images comprises
+    // (la tâche quotidienne pg_cron purge aussi la base, mais ne peut pas effacer les images).
+    async function sweepTrash() {
+      try {
+        const { data: rows } = await sb.rpc("admin_list_trash");
+        const today = state.status.today;
+        for (const r of rows || []) if (r.purge_on <= today) await purgeStore(r.store_id);
+      } catch (e) { console.warn("Corbeille :", e); }
     }
 
     async function doReactivate(c, onDone) {
@@ -529,7 +588,7 @@
         whatsapp: o.whatsapp, city: o.city, country: o.country, store_id: store.id, store_name: store.name,
         business_type: store.business_type, address: store.address, plan_id: sub && sub.plan_id,
         plan_name: plan && plan.name, start_date: sub && sub.start_date, end_date: sub && sub.end_date,
-        days_left: daysLeft, state: stateValue, role: o.role,
+        days_left: daysLeft, state: stateValue, role: o.role, trashed: !!store.deleted_at,
       };
       const url = getStoreUrl(store.id);
       const dd = (label, value) => `<dt>${label}</dt><dd>${value || "—"}</dd>`;
@@ -540,7 +599,7 @@
           <div class="row">${contactButtons(c, false)}</div>
         </div>
         ${store.suspension_reason ? `<div class="alert alert-danger">Suspendu : ${escapeHtml(store.suspension_reason)}</div>` : ""}
-        <div class="card mb-2"><div class="row">${actionButtons(c, false)}</div></div>
+        ${c.trashed ? `<div class="alert alert-danger">Dans la corbeille depuis le ${formatDate(store.deleted_at)}. <a href="#trash">Ouvrir la corbeille</a></div>` : `<div class="card mb-2"><div class="row">${actionButtons(c, false)}</div></div>`}
         <div class="grid cols-2">
           <div class="card"><h2>Informations</h2><dl class="kv">
             ${dd("Prénom", escapeHtml(o.first_name))}${dd("Nom", escapeHtml(o.last_name))}
@@ -623,7 +682,8 @@
       if (l.action === "set_dates") return `${formatDate(d.new_start_date)} → ${formatDate(d.new_end_date)}`;
       if (l.action === "change_plan") return `${escapeHtml(d.old_plan || "—")} → ${escapeHtml(d.new_plan)}`;
       if (l.action === "suspend") return escapeHtml(d.reason || "");
-      if (l.action === "delete_client") return escapeHtml(`${d.name || ""} · ${d.owner || ""} · ${d.email || ""}`);
+      if (l.action === "trash" || l.action === "restore") return escapeHtml(d.name || "");
+      if (l.action === "delete_client" || l.action === "delete_store") return escapeHtml(`${d.name || ""} · ${d.owner || ""} · ${d.email || ""}`);
       if (l.action.startsWith("delete_")) return escapeHtml(d.name || "");
       if (l.action === "signup") return escapeHtml(d.business_name || "");
       return "";
@@ -648,7 +708,7 @@
       async function load() {
         box.innerHTML = '<div class="page-loader" style="min-height:160px"><div class="spinner"></div></div>';
         try {
-          const { data, error } = await sb.rpc("admin_list_clients", { p_search: search || null, p_status: null, p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE });
+          const { data, error } = await sb.rpc("admin_list_clients", { p_search: search || null, p_status: null, p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE, p_include_admins: true });
           if (error) throw error;
           if (!data.rows.length) { box.innerHTML = `<div class="empty">${icon("store")}Aucune boutique.</div>`; return; }
           box.innerHTML = `<div class="table-wrap"><table class="table">
@@ -776,6 +836,7 @@
         window.addEventListener("hashchange", router);
         await loadPlans();
         router();
+        sweepTrash();
       } catch (e) {
         console.error(e);
         main.innerHTML = '<div class="card empty">Une erreur est survenue.</div>';
