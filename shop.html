@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="fr" data-theme="modern">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Boutique</title>
+  <meta name="description" content="Boutique en ligne">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Boutique">
+  <meta property="og:description" content="Boutique en ligne">
+  <meta property="og:image" content="">
+  <meta property="og:url" content="">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#111827">
+  <link rel="icon" href="assets/icons/icon-192.png" id="favicon">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+  <script src="assets/app.js"></script>
+  <style>
+    /* ---------- Thème : toutes les couleurs viennent de Supabase ---------- */
+    :root {
+      --primary-color: #111827;
+      --secondary-color: #6366f1;
+      --background-color: #ffffff;
+      --text-color: #111827;
+      --button-color: #111827;
+      --shop-radius: 14px;
+      --shop-heading: var(--font);
+    }
+    [data-theme="classic"] { --shop-radius: 6px; --shop-heading: Georgia, "Times New Roman", serif; }
+    [data-theme="modern"]  { --shop-radius: 16px; }
+    [data-theme="minimal"] { --shop-radius: 0px; }
+    [data-theme="elegant"] { --shop-radius: 4px; --shop-heading: "Didot", "Bodoni MT", Georgia, serif; }
+    [data-theme="elegant"] .shop-title, [data-theme="elegant"] .section-title { letter-spacing: .06em; text-transform: uppercase; font-weight: 500; }
+    [data-theme="minimal"] .product { box-shadow: none; }
+
+    body.shop { background: var(--background-color); color: var(--text-color); }
+    .shop h1, .shop h2, .shop h3 { font-family: var(--shop-heading); }
+    .shop .wrap { max-width: 1160px; margin: 0 auto; padding: 0 1rem; }
+    .shop .muted { color: color-mix(in srgb, var(--text-color) 60%, transparent); }
+    .shop-header { position: sticky; top: 0; z-index: 30; background: var(--primary-color); color: #fff; }
+    .shop-header .wrap { display: flex; align-items: center; gap: .75rem; height: 64px; }
+    .shop-header .brand { display: flex; align-items: center; gap: .6rem; color: #fff; min-width: 0; flex: 1; text-decoration: none; }
+    .shop-header .brand img { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; background: #fff; }
+    .shop-title { font-size: 1.1rem; font-weight: 700; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cart-btn { position: relative; background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 99px; height: 42px; padding: 0 1rem; display: flex; gap: .5rem; align-items: center; font: inherit; font-weight: 600; cursor: pointer; }
+    .cart-btn .count { background: var(--secondary-color); color: #fff; border-radius: 99px; min-width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: .78rem; padding: 0 6px; }
+
+    .hero { position: relative; color: #fff; background: var(--primary-color); }
+    .hero.has-banner { min-height: 220px; background-size: cover; background-position: center; display: flex; align-items: flex-end; }
+    .hero.has-banner::before { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,.05)); }
+    .hero .wrap { position: relative; padding-top: 2rem; padding-bottom: 2rem; width: 100%; }
+    .hero h2 { font-size: clamp(1.4rem, 5vw, 2.3rem); margin: 0 0 .35rem; color: #fff; }
+    .hero p { margin: 0; opacity: .9; max-width: 640px; }
+    @media (min-width: 768px) { .hero.has-banner { min-height: 320px; } }
+
+    .toolbar { display: flex; gap: .5rem; padding: 1rem 0 .5rem; flex-wrap: wrap; }
+    .toolbar .search { flex: 1; min-width: 200px; }
+    .chips { display: flex; gap: .5rem; overflow-x: auto; padding: .25rem 0 1rem; scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--text-color) 18%, transparent); background: transparent; color: var(--text-color); border-radius: 99px; padding: .45rem .95rem; font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; }
+    .chip.active { background: var(--primary-color); border-color: var(--primary-color); color: #fff; }
+
+    .products { display: grid; gap: .75rem; grid-template-columns: repeat(2, 1fr); }
+    @media (min-width: 700px) { .products { grid-template-columns: repeat(3, 1fr); gap: 1rem; } }
+    @media (min-width: 1024px) { .products { grid-template-columns: repeat(4, 1fr); } }
+    .product { background: color-mix(in srgb, var(--background-color) 92%, var(--text-color)); border-radius: var(--shop-radius); overflow: hidden; display: flex; flex-direction: column; cursor: pointer; border: 0; padding: 0; text-align: left; font: inherit; color: inherit; }
+    .product .img { position: relative; aspect-ratio: 1; background: color-mix(in srgb, var(--background-color) 85%, var(--text-color)); }
+    .product .img img { width: 100%; height: 100%; object-fit: cover; }
+    .product .tag { position: absolute; top: .5rem; left: .5rem; background: var(--secondary-color); color: #fff; font-size: .72rem; font-weight: 700; padding: .2rem .5rem; border-radius: 99px; }
+    .product .tag.out { background: #4b5563; }
+    .product .info { padding: .7rem .75rem .85rem; display: flex; flex-direction: column; gap: .2rem; flex: 1; }
+    .product .name { font-weight: 600; font-size: .93rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .price-line { display: flex; gap: .45rem; align-items: baseline; flex-wrap: wrap; }
+    .price-now { font-weight: 800; color: var(--secondary-color); }
+    .price-old { font-size: .82rem; text-decoration: line-through; opacity: .55; }
+    .shop .btn-shop { background: var(--button-color); border-color: var(--button-color); color: #fff; border-radius: var(--shop-radius); }
+    .shop .btn-shop:hover { filter: brightness(1.12); background: var(--button-color); }
+    .shop .btn { border-radius: var(--shop-radius); }
+
+    .section { padding: 2.5rem 0; }
+    .section-title { font-size: 1.3rem; margin-bottom: 1rem; }
+    .contact-grid { display: grid; gap: .75rem; grid-template-columns: 1fr; }
+    @media (min-width: 700px) { .contact-grid { grid-template-columns: 1fr 1fr; } }
+    .contact-item { display: flex; gap: .75rem; align-items: flex-start; }
+    .contact-item .ic { width: 38px; height: 38px; border-radius: 10px; background: color-mix(in srgb, var(--secondary-color) 14%, transparent); color: var(--secondary-color); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .socials { display: flex; gap: .5rem; margin-top: 1rem; }
+    .socials a { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--primary-color); color: #fff; }
+    .shop-footer { padding: 1.5rem 0 2rem; font-size: .85rem; text-align: center; border-top: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent); }
+    .shop-footer a { color: inherit; }
+
+    /* Modales et panier dans les couleurs de la boutique */
+    .shop .modal { background: var(--background-color); color: var(--text-color); }
+    .pm-gallery { display: grid; gap: .5rem; }
+    .pm-main { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--shop-radius); background: color-mix(in srgb, var(--background-color) 85%, var(--text-color)); }
+    .pm-thumbs { display: flex; gap: .5rem; overflow-x: auto; }
+    .pm-thumbs img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; cursor: pointer; opacity: .65; border: 2px solid transparent; }
+    .pm-thumbs img.active { opacity: 1; border-color: var(--secondary-color); }
+    @media (min-width: 640px) { .pm-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; } }
+    .qty { display: inline-flex; align-items: center; border: 1px solid color-mix(in srgb, var(--text-color) 18%, transparent); border-radius: var(--shop-radius); }
+    .qty button { width: 40px; height: 40px; border: 0; background: none; cursor: pointer; color: inherit; display: flex; align-items: center; justify-content: center; }
+    .qty span { min-width: 32px; text-align: center; font-weight: 700; }
+    .cart-line { display: flex; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent); align-items: center; }
+    .cart-line img, .cart-line .ph { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; background: color-mix(in srgb, var(--background-color) 85%, var(--text-color)); flex-shrink: 0; }
+    .cart-total { display: flex; justify-content: space-between; font-size: 1.1rem; font-weight: 800; padding: 1rem 0; }
+
+    .unavailable { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; text-align: center; background: var(--bg); }
+    .unavailable .card { max-width: 440px; padding: 2.25rem 1.5rem; }
+    .unavailable .ic { width: 56px; height: 56px; border-radius: 50%; background: var(--surface-2); color: var(--muted); display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; }
+    .unavailable .ic svg { width: 26px; height: 26px; }
+    .load-more { display: flex; justify-content: center; padding: 1.5rem 0 0; }
+  </style>
+</head>
+<body class="shop">
+  <div id="app"><div class="page-loader" style="min-height:100vh"><div class="spinner"></div></div></div>
+
+  <script>
+    /* =========================================================================
+       BOUTIQUE PUBLIQUE : shop.html?store=UUID
+       1. lire ?store ; 2. vérifier le format ; 3. demander à Supabase CETTE
+       boutique uniquement (get_public_store) ; 4. charger ses produits filtrés
+       par store_id côté Supabase. Jamais de chargement de toutes les boutiques.
+       La RLS garantit en plus qu'aucun produit d'une autre boutique, d'une
+       boutique suspendue ou expirée ne peut être renvoyé.
+       ========================================================================= */
+    const params = new URLSearchParams(window.location.search);
+    const storeId = (params.get("store") || "").trim();
+    const app = document.getElementById("app");
+    const SHOP_PAGE = 24;
+    const MAX_QTY = 99;
+
+    const SHOP = { store: null, settings: null, categories: [], products: [], query: { category: "", search: "", page: 0 }, hasMore: false };
+    const cartKey = "cart_" + storeId;                       // un panier PAR boutique, jamais mélangé
+    const productsById = new Map();
+
+    const cur = () => (SHOP.settings && SHOP.settings.currency) || "DZD";
+    const money = (v) => formatPrice(v, cur());
+
+    /* ----------------------------- États indisponibles ---------------------- */
+    const UNAVAILABLE = {
+      not_found: ["Cette boutique n'existe pas ou n'est plus disponible.", "store"],
+      suspended: ["Cette boutique est temporairement indisponible.", "clock"],
+      expired: ["Cette boutique est actuellement indisponible.", "clock"],
+      pending: ["Cette boutique est actuellement indisponible.", "clock"],
+    };
+    function showUnavailable(state) {
+      const [text, ic] = UNAVAILABLE[state] || UNAVAILABLE.not_found;
+      document.title = "Boutique indisponible";
+      setMeta("robots", "noindex");
+      document.body.classList.remove("shop");
+      app.innerHTML = `<div class="unavailable"><div class="card">
+        <div class="ic">${icon(ic)}</div>
+        <h1 style="font-size:1.25rem">${escapeHtml(text)}</h1>
+        <p class="muted mb-0">Vérifiez le lien ou réessayez plus tard.</p>
+        <a class="btn mt-3" href="index.html">${escapeHtml(APP_NAME)}</a></div></div>`;
+    }
+
+    /* ----------------------------- SEO ------------------------------------- */
+    function setMeta(name, content, attr = "name") {
+      let el = document.head.querySelector(`meta[${attr}="${name}"]`);
+      if (!el) { el = document.createElement("meta"); el.setAttribute(attr, name); document.head.appendChild(el); }
+      el.setAttribute("content", content || "");
+    }
+    function applySeo() {
+      const s = SHOP.store, t = SHOP.settings;
+      const title = t.seo_title || (s.slogan ? `${s.name} · ${s.slogan}` : s.name);
+      const desc = t.seo_description || s.description || s.slogan || `Découvrez la boutique ${s.name}.`;
+      const url = getStoreUrl(s.id);
+      document.title = title;
+      setMeta("description", desc.slice(0, 300));
+      setMeta("og:title", title, "property");
+      setMeta("og:description", desc.slice(0, 300), "property");
+      setMeta("og:url", url, "property");
+      setMeta("og:site_name", s.name, "property");
+      setMeta("og:image", s.banner_url || s.logo_url || "", "property");
+      setMeta("theme-color", t.primary_color);
+      if (s.favicon_url || s.logo_url) document.getElementById("favicon").href = s.favicon_url || s.logo_url;
+      let canonical = document.querySelector('link[rel="canonical"]');
+      if (!canonical) { canonical = document.createElement("link"); canonical.rel = "canonical"; document.head.appendChild(canonical); }
+      canonical.href = url;
+      // Données structurées (schema.org) pour les moteurs de recherche
+      const ld = {
+        "@context": "https://schema.org", "@type": "Store", name: s.name, url,
+        description: desc, image: s.banner_url || s.logo_url || undefined, logo: s.logo_url || undefined,
+        telephone: t.contact_phone || undefined, email: t.contact_email || undefined,
+        address: s.address ? { "@type": "PostalAddress", streetAddress: s.address, addressLocality: s.city || undefined, addressCountry: s.country || undefined } : undefined,
+        sameAs: [t.instagram_url, t.facebook_url, t.tiktok_url].filter(Boolean),
+      };
+      const script = document.createElement("script");
+      script.type = "application/ld+json";
+      script.textContent = JSON.stringify(ld);
+      document.head.appendChild(script);
+    }
+
+    /* ----------------------------- Thème ----------------------------------- */
+    function applyTheme() {
+      const t = SHOP.settings, root = document.documentElement;
+      root.dataset.theme = t.theme || "modern";
+      const hex = (v, d) => (/^#[0-9a-fA-F]{6}$/.test(v || "") ? v : d);
+      root.style.setProperty("--primary-color", hex(t.primary_color, "#111827"));
+      root.style.setProperty("--secondary-color", hex(t.secondary_color, "#6366f1"));
+      root.style.setProperty("--background-color", hex(t.background_color, "#ffffff"));
+      root.style.setProperty("--text-color", hex(t.text_color, "#111827"));
+      root.style.setProperty("--button-color", hex(t.button_color, "#111827"));
+    }
+
+    /* ----------------------------- Chargement ------------------------------- */
+    async function loadStore() {
+      const { data, error } = await sb.rpc("get_public_store", { p_store_id: storeId });
+      if (error) throw error;
+      return data;
+    }
+
+    async function loadCategories() {
+      const { data, error } = await sb.from("categories").select("id, name, image_url")
+        .eq("store_id", storeId).eq("is_active", true).order("sort_order").order("name");
+      if (error) throw error;
+      return data;
+    }
+
+    async function loadProducts(append = false) {
+      const q = SHOP.query;
+      let req = sb.from("products")
+        .select("id, name, description, price, old_price, stock, track_stock, image_url, images, is_featured, category_id")
+        .eq("store_id", storeId).eq("is_active", true);
+      if (q.category) req = req.eq("category_id", q.category);
+      const s = q.search.replace(/[,()*%"\\]/g, " ").trim();
+      if (s) req = req.ilike("name", `%${s}%`);
+      const from = q.page * SHOP_PAGE;
+      const { data, error } = await req.order("is_featured", { ascending: false }).order("created_at", { ascending: false })
+        .range(from, from + SHOP_PAGE);   // un de plus pour savoir s'il en reste
+      if (error) throw error;
+      SHOP.hasMore = data.length > SHOP_PAGE;
+      const page = data.slice(0, SHOP_PAGE);
+      page.forEach((p) => productsById.set(p.id, p));
+      SHOP.products = append ? SHOP.products.concat(page) : page;
+    }
+
+    /* ----------------------------- Rendu ----------------------------------- */
+    function renderShop() {
+      const s = SHOP.store, t = SHOP.settings;
+      const banner = safeUrl(s.banner_url);
+      const socials = [["instagram", t.instagram_url], ["facebook", t.facebook_url], ["tiktok", t.tiktok_url]]
+        .filter(([, u]) => safeUrl(u));
+      const contacts = [
+        t.contact_phone && ["phone", "Téléphone", `<a href="${telLink(t.contact_phone)}">${escapeHtml(t.contact_phone)}</a>`],
+        t.contact_whatsapp && ["whatsapp", "WhatsApp", `<a href="${whatsappLink(t.contact_whatsapp)}" target="_blank" rel="noopener">${escapeHtml(t.contact_whatsapp)}</a>`],
+        t.contact_email && ["mail", "Email", `<a href="mailto:${escapeHtml(t.contact_email)}">${escapeHtml(t.contact_email)}</a>`],
+        s.address && ["map", "Adresse", escapeHtml([s.address, s.city].filter(Boolean).join(", "))],
+        t.opening_hours && ["clock", "Horaires", escapeHtml(t.opening_hours)],
+        t.delivery_info && ["box", "Livraison", escapeHtml(t.delivery_info)],
+      ].filter(Boolean);
+
+      app.innerHTML = `
+        <header class="shop-header"><div class="wrap">
+          <a class="brand" href="${escapeHtml(getStoreUrl(s.id))}">
+            ${safeUrl(s.logo_url) ? `<img src="${escapeHtml(s.logo_url)}" alt="${escapeHtml(s.name)}">` : ""}
+            <h1 class="shop-title">${escapeHtml(s.name)}</h1></a>
+          <button class="cart-btn" id="cart-btn" aria-label="Panier">${icon("cart")}<span class="count" id="cart-count">0</span></button>
+        </div></header>
+
+        <section class="hero ${banner ? "has-banner" : ""}" ${banner ? `style="background-image:url('${escapeHtml(banner)}')"` : ""}>
+          <div class="wrap"><h2>${escapeHtml(s.slogan || s.name)}</h2>
+          ${s.description ? `<p>${escapeHtml(s.description.length > 180 ? s.description.slice(0, 180) + "…" : s.description)}</p>` : ""}</div>
+        </section>
+
+        <main class="wrap" id="catalogue">
+          <form class="toolbar" id="search-form" role="search">
+            <input class="input search" type="search" name="q" placeholder="Rechercher un produit…" aria-label="Rechercher">
+            <button class="btn btn-shop" type="submit">${icon("search")}</button>
+          </form>
+          <div class="chips" id="chips"></div>
+          <div class="products" id="products"></div>
+          <div class="load-more" id="load-more"></div>
+        </main>
+
+        ${(s.description || contacts.length || socials.length) ? `
+        <section class="section"><div class="wrap">
+          ${s.description ? `<h2 class="section-title">À propos</h2><p style="white-space:pre-line;max-width:760px">${escapeHtml(s.description)}</p>` : ""}
+          ${contacts.length ? `<h2 class="section-title mt-3">Contact</h2><div class="contact-grid">${contacts.map(([ic, l, v]) =>
+            `<div class="contact-item"><div class="ic">${icon(ic)}</div><div><div class="small muted">${l}</div><div style="font-weight:600;word-break:break-word">${v}</div></div></div>`).join("")}</div>` : ""}
+          ${socials.length ? `<div class="socials">${socials.map(([n, u]) => `<a href="${escapeHtml(safeUrl(u))}" target="_blank" rel="noopener" aria-label="${n}">${icon(n)}</a>`).join("")}</div>` : ""}
+        </div></section>` : ""}
+
+        <footer class="shop-footer"><div class="wrap">© ${new Date().getFullYear()} ${escapeHtml(s.name)} · Boutique créée avec <a href="index.html">${escapeHtml(APP_NAME)}</a></div></footer>`;
+
+      document.getElementById("cart-btn").onclick = openCart;
+      document.getElementById("search-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        SHOP.query.search = e.target.q.value; SHOP.query.page = 0;
+        await refreshProducts();
+      });
+      renderChips();
+      renderProducts();
+      updateCartCount();
+    }
+
+    function renderChips() {
+      const box = document.getElementById("chips");
+      if (!SHOP.categories.length) { box.classList.add("hidden"); return; }
+      box.innerHTML = [["", "Tout"], ...SHOP.categories.map((c) => [c.id, c.name])].map(([id, name]) =>
+        `<button class="chip ${SHOP.query.category === id ? "active" : ""}" data-cat="${id}">${escapeHtml(name)}</button>`).join("");
+      box.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = async () => {
+        SHOP.query.category = b.dataset.cat; SHOP.query.page = 0;
+        renderChips(); await refreshProducts();
+      }));
+    }
+
+    async function refreshProducts() {
+      const box = document.getElementById("products");
+      box.style.opacity = ".5";
+      try { await loadProducts(false); renderProducts(); }
+      catch (e) { handleError(e); }
+      finally { box.style.opacity = ""; }
+    }
+
+    const inStock = (p) => !p.track_stock || p.stock > 0;
+
+    function productCard(p) {
+      const promo = p.old_price && Number(p.old_price) > Number(p.price)
+        ? Math.round((1 - p.price / p.old_price) * 100) : 0;
+      return `<button class="product" data-product="${p.id}">
+        <div class="img">${safeUrl(p.image_url) ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}" loading="lazy">` : ""}
+          ${!inStock(p) ? '<span class="tag out">Rupture</span>' : promo ? `<span class="tag">-${promo}%</span>` : p.is_featured ? '<span class="tag">Vedette</span>' : ""}</div>
+        <div class="info"><span class="name">${escapeHtml(p.name)}</span>
+          <span class="price-line"><span class="price-now">${money(p.price)}</span>${promo ? `<span class="price-old">${money(p.old_price)}</span>` : ""}</span></div>
+      </button>`;
+    }
+
+    function renderProducts() {
+      const box = document.getElementById("products");
+      box.innerHTML = SHOP.products.length ? SHOP.products.map(productCard).join("")
+        : `<div class="empty" style="grid-column:1/-1">${icon("box")}Aucun produit${SHOP.query.search || SHOP.query.category ? " ne correspond à votre recherche" : " pour le moment"}.</div>`;
+      box.querySelectorAll("[data-product]").forEach((b) => (b.onclick = () => openProduct(productsById.get(b.dataset.product))));
+      const more = document.getElementById("load-more");
+      more.innerHTML = SHOP.hasMore ? '<button class="btn">Voir plus de produits</button>' : "";
+      if (SHOP.hasMore) more.querySelector("button").onclick = async (e) => {
+        await withBusy(e.target, async () => {
+          SHOP.query.page++;
+          try { await loadProducts(true); renderProducts(); } catch (err) { handleError(err); }
+        });
+      };
+    }
+
+    function openProduct(p) {
+      const imgs = [p.image_url, ...(p.images || [])].map(safeUrl).filter(Boolean);
+      let qty = 1;
+      const promo = p.old_price && Number(p.old_price) > Number(p.price);
+      const modal = openModal({
+        title: p.name, size: "lg",
+        body: `<div class="pm-layout">
+          <div class="pm-gallery">${imgs.length ? `<img class="pm-main" src="${escapeHtml(imgs[0])}" alt="${escapeHtml(p.name)}">
+            ${imgs.length > 1 ? `<div class="pm-thumbs">${imgs.map((u, i) => `<img src="${escapeHtml(u)}" data-i="${i}" class="${i === 0 ? "active" : ""}" alt="">`).join("")}</div>` : ""}`
+            : '<div class="pm-main"></div>'}</div>
+          <div>
+            <div class="price-line mb-2"><span class="price-now" style="font-size:1.5rem">${money(p.price)}</span>${promo ? `<span class="price-old">${money(p.old_price)}</span>` : ""}</div>
+            ${p.description ? `<p style="white-space:pre-line">${escapeHtml(p.description)}</p>` : ""}
+            ${inStock(p) ? `${p.track_stock && p.stock <= 5 ? `<p class="small muted">Plus que ${p.stock} en stock.</p>` : ""}
+              <div class="row mt-2"><div class="qty"><button type="button" data-q="-1" aria-label="Moins">${icon("minus")}</button><span id="pm-qty">1</span><button type="button" data-q="1" aria-label="Plus">${icon("plus")}</button></div>
+              <button class="btn btn-shop grow" id="pm-add">${icon("cart")} Ajouter au panier</button></div>`
+              : '<p><span class="badge badge-danger">Rupture de stock</span></p>'}
+          </div></div>`,
+      });
+      modal.querySelectorAll(".pm-thumbs img").forEach((t) => (t.onclick = () => {
+        modal.querySelector(".pm-main").src = imgs[Number(t.dataset.i)];
+        modal.querySelectorAll(".pm-thumbs img").forEach((x) => x.classList.toggle("active", x === t));
+      }));
+      const maxQty = p.track_stock ? Math.min(p.stock, MAX_QTY) : MAX_QTY;
+      modal.querySelectorAll("[data-q]").forEach((b) => (b.onclick = () => {
+        qty = Math.max(1, Math.min(maxQty, qty + Number(b.dataset.q)));
+        modal.querySelector("#pm-qty").textContent = qty;
+      }));
+      const add = modal.querySelector("#pm-add");
+      if (add) add.onclick = () => { addToCart(p, qty); closeModal(); };
+    }
+
+    /* ----------------------------- Panier (localStorage) -------------------- */
+    function getCart() {
+      try { return JSON.parse(localStorage.getItem(cartKey)) || []; } catch (e) { return []; }
+    }
+    function saveCart(cart) {
+      try { localStorage.setItem(cartKey, JSON.stringify(cart)); } catch (e) { /* stockage indisponible */ }
+      updateCartCount();
+    }
+    function addToCart(p, qty = 1) {
+      const cart = getCart();
+      const line = cart.find((l) => l.product_id === p.id);
+      const max = p.track_stock ? Math.min(p.stock, MAX_QTY) : MAX_QTY;
+      if (line) line.quantity = Math.min(max, line.quantity + qty);
+      else cart.push({ product_id: p.id, name: p.name, price: Number(p.price), image_url: p.image_url, quantity: Math.min(max, qty), max });
+      saveCart(cart);
+      showToast(`« ${p.name} » ajouté au panier.`, "success");
+    }
+    function removeFromCart(productId) { saveCart(getCart().filter((l) => l.product_id !== productId)); }
+    function updateQuantity(productId, delta) {
+      const cart = getCart();
+      const line = cart.find((l) => l.product_id === productId);
+      if (!line) return;
+      line.quantity = Math.max(1, Math.min(line.max || MAX_QTY, line.quantity + delta));
+      saveCart(cart);
+    }
+    function clearCart() { saveCart([]); }
+    function cartTotal(cart = getCart()) { return cart.reduce((sum, l) => sum + l.price * l.quantity, 0); }
+    function updateCartCount() {
+      const el = document.getElementById("cart-count");
+      if (el) el.textContent = getCart().reduce((n, l) => n + l.quantity, 0);
+    }
+
+    // Les prix du panier sont rafraîchis depuis la base (le total final est de toute façon recalculé par Supabase).
+    async function refreshCartFromDb() {
+      const cart = getCart();
+      if (!cart.length) return;
+      const ids = cart.map((l) => l.product_id).filter((id) => UUID_RE.test(id));
+      const { data, error } = await sb.from("products").select("id, name, price, stock, track_stock, image_url")
+        .eq("store_id", storeId).eq("is_active", true).in("id", ids);
+      if (error) throw error;
+      const fresh = new Map(data.map((p) => [p.id, p]));
+      const next = cart.filter((l) => fresh.has(l.product_id)).map((l) => {
+        const p = fresh.get(l.product_id);
+        const max = p.track_stock ? Math.min(p.stock, MAX_QTY) : MAX_QTY;
+        return { ...l, name: p.name, price: Number(p.price), image_url: p.image_url, max, quantity: Math.min(l.quantity, max) };
+      }).filter((l) => l.quantity > 0);
+      if (next.length !== cart.length) showToast("Certains produits ne sont plus disponibles et ont été retirés du panier.");
+      saveCart(next);
+    }
+
+    async function openCart() {
+      try { await refreshCartFromDb(); } catch (e) { console.error(e); }
+      renderCartModal();
+    }
+
+    function renderCartModal() {
+      const cart = getCart();
+      const fee = Number(SHOP.settings.delivery_fee || 0);
+      const modal = openModal({
+        title: "Votre panier",
+        body: cart.length ? `
+          <div>${cart.map((l) => `<div class="cart-line">
+            ${safeUrl(l.image_url) ? `<img src="${escapeHtml(l.image_url)}" alt="">` : '<div class="ph"></div>'}
+            <div class="grow"><div style="font-weight:600">${escapeHtml(l.name)}</div><div class="small muted">${money(l.price)}</div>
+              <div class="row mt-1"><div class="qty"><button data-dec="${l.product_id}" aria-label="Moins">${icon("minus")}</button><span>${l.quantity}</span><button data-inc="${l.product_id}" aria-label="Plus">${icon("plus")}</button></div>
+              <button class="btn btn-ghost btn-sm" data-rm="${l.product_id}">${icon("trash")} Supprimer</button></div></div>
+            <strong class="nowrap">${money(l.price * l.quantity)}</strong></div>`).join("")}</div>
+          ${fee ? `<div class="row-between mt-2 small"><span>Livraison</span><span>${money(fee)}</span></div>` : ""}
+          <div class="cart-total"><span>Total</span><span>${money(cartTotal(cart) + fee)}</span></div>
+          <div class="modal-footer" style="justify-content:space-between">
+            <button class="btn btn-ghost" id="clear-cart">Vider le panier</button>
+            <button class="btn btn-shop" id="checkout">Passer la commande</button></div>`
+          : `<div class="empty">${icon("cart")}Votre panier est vide.</div>`,
+      });
+      modal.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = () => { updateQuantity(b.dataset.inc, 1); renderCartModal(); }));
+      modal.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = () => { updateQuantity(b.dataset.dec, -1); renderCartModal(); }));
+      modal.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { removeFromCart(b.dataset.rm); renderCartModal(); }));
+      const clear = modal.querySelector("#clear-cart");
+      if (clear) clear.onclick = async () => { if (await confirmAction("Vider le panier ?", { confirmText: "Vider" })) { clearCart(); renderCartModal(); } };
+      const co = modal.querySelector("#checkout");
+      if (co) co.onclick = openCheckout;
+    }
+
+    /* ----------------------------- Commande -------------------------------- */
+    function openCheckout() {
+      const cart = getCart();
+      if (!cart.length) return;
+      const fee = Number(SHOP.settings.delivery_fee || 0);
+      const wa = SHOP.settings.whatsapp_order_enabled && SHOP.settings.contact_whatsapp;
+      const modal = openModal({
+        title: "Finaliser la commande",
+        body: `<form novalidate id="checkout-form">
+          <div class="field"><label>Nom complet *</label><input class="input" name="name" autocomplete="name" maxlength="120" required></div>
+          <div class="field"><label>Téléphone *</label><input class="input" name="phone" type="tel" autocomplete="tel" maxlength="30" required></div>
+          <div class="field"><label>WhatsApp</label><input class="input" name="whatsapp" type="tel" maxlength="30"></div>
+          <div class="field"><label>Adresse de livraison *</label><textarea class="input" name="address" autocomplete="street-address" maxlength="500" required style="min-height:72px"></textarea></div>
+          <div class="field"><label>Commentaire</label><textarea class="input" name="comment" maxlength="1000" style="min-height:64px"></textarea></div>
+          <div class="cart-total"><span>Total</span><span>${money(cartTotal(cart) + fee)}</span></div>
+          <p class="small muted">Paiement à la livraison. Le commerçant vous contactera pour confirmer.</p>
+          <div class="form-error hidden" id="checkout-error" role="alert"></div>
+          <div class="stack"><button class="btn btn-shop btn-block" type="submit" data-source="web">Confirmer la commande</button>
+          ${wa ? `<button class="btn btn-success btn-block" type="button" id="wa-order">${icon("whatsapp")} Commander via WhatsApp</button>` : ""}</div>
+        </form>`,
+      });
+      const form = modal.querySelector("form");
+      const errBox = modal.querySelector("#checkout-error");
+      // Restaure les infos client saisies lors d'une commande précédente (confort).
+      try { const saved = JSON.parse(localStorage.getItem("customer_info") || "{}"); ["name", "phone", "whatsapp", "address"].forEach((k) => saved[k] && (form[k].value = saved[k])); } catch (e) { /* rien */ }
+
+      const validate = () => {
+        const d = formData(form);
+        const fail = (msg, f) => { errBox.textContent = msg; errBox.classList.remove("hidden"); form[f].focus(); return null; };
+        if (!d.name) return fail("Indiquez votre nom.", "name");
+        if (!/^[0-9+() .-]{6,30}$/.test(d.phone)) return fail("Indiquez un numéro de téléphone valide.", "phone");
+        if (d.whatsapp && !/^[0-9+() .-]{6,30}$/.test(d.whatsapp)) return fail("Numéro WhatsApp invalide.", "whatsapp");
+        if (!d.address) return fail("Indiquez votre adresse de livraison.", "address");
+        errBox.classList.add("hidden");
+        return d;
+      };
+
+      async function submit(source, button) {
+        const d = validate();
+        if (!d) return;
+        // Ouvre la fenêtre WhatsApp tout de suite (sinon le navigateur la bloque après l'attente réseau).
+        const waWindow = source === "whatsapp" ? window.open("", "_blank") : null;
+        await withBusy(button, async () => {
+          try {
+            const items = getCart().map((l) => ({ product_id: l.product_id, quantity: l.quantity }));
+            const { data, error } = await sb.rpc("place_order", {
+              p_store_id: storeId,
+              p_customer: { name: d.name, phone: d.phone, whatsapp: d.whatsapp || null, address: d.address, comment: d.comment || null },
+              p_items: items, p_source: source,
+            });
+            if (error) throw error;
+            try { localStorage.setItem("customer_info", JSON.stringify({ name: d.name, phone: d.phone, whatsapp: d.whatsapp, address: d.address })); } catch (e) { /* rien */ }
+            clearCart();
+            if (source === "whatsapp") {
+              const link = whatsappLink(SHOP.settings.contact_whatsapp, buildWhatsappMessage(data, d));
+              if (waWindow) waWindow.location.href = link; else window.location.href = link;
+            }
+            showConfirmation(data);
+          } catch (err) {
+            if (waWindow) waWindow.close();
+            console.error(err);
+            errBox.textContent = friendlyError(err);
+            errBox.classList.remove("hidden");
+            if (/PRODUCT_UNAVAILABLE|INSUFFICIENT_STOCK/.test(err.message || "")) refreshCartFromDb().catch(() => {});
+          }
+        });
+      }
+      form.addEventListener("submit", (e) => { e.preventDefault(); submit("web", form.querySelector("[type=submit]")); });
+      const waBtn = modal.querySelector("#wa-order");
+      if (waBtn) waBtn.onclick = () => submit("whatsapp", waBtn);
+    }
+
+    // Message WhatsApp construit à partir de la commande ENREGISTRÉE (prix vérifiés par la base).
+    function buildWhatsappMessage(order, d) {
+      const lines = order.items.map((i) => `${i.name} x${i.quantity}`).join("\n");
+      return `Bonjour,\n\nJe souhaite commander :\n\n${lines}\n\n`
+        + (Number(order.delivery_fee) ? `Livraison : ${money(order.delivery_fee)}\n` : "")
+        + `Total : ${money(order.total)}\n\nCommande n° ${order.order_number}\n\n`
+        + `Nom : ${d.name}\nTéléphone : ${d.phone}\nAdresse : ${d.address}`
+        + (d.comment ? `\nCommentaire : ${d.comment}` : "");
+    }
+
+    function showConfirmation(order) {
+      openModal({
+        title: "Commande confirmée",
+        body: `<div class="center">
+          <div style="width:56px;height:56px;border-radius:50%;background:var(--success-soft);color:var(--success);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem">${icon("check")}</div>
+          <h3>Merci ! Votre commande n° ${order.order_number} est enregistrée.</h3>
+          <p class="muted">Total : <strong>${money(order.total)}</strong>. ${escapeHtml(SHOP.store.name)} vous contactera rapidement pour confirmer la livraison.</p>
+          <button class="btn btn-shop" data-close>Continuer mes achats</button></div>`,
+      });
+      refreshProducts();
+    }
+
+    /* ----------------------------- Démarrage -------------------------------- */
+    (async function init() {
+      if (!IS_CONFIGURED) return showConfigError();
+      // 1-2. Paramètre présent et au bon format, sinon inutile d'interroger la base.
+      if (!UUID_RE.test(storeId)) return showUnavailable("not_found");
+      try {
+        // 3. Uniquement CETTE boutique, et seulement si elle est publique.
+        const res = await loadStore();
+        if (!res || res.state !== "ok") return showUnavailable(res ? res.state : "not_found");
+        SHOP.store = res.store;
+        SHOP.settings = res.settings;
+        applyTheme();
+        applySeo();
+        // 4. Uniquement ses données publiques, filtrées par store_id côté Supabase.
+        const [cats] = await Promise.all([loadCategories(), loadProducts()]);
+        SHOP.categories = cats;
+        renderShop();
+      } catch (e) {
+        console.error(e);
+        app.innerHTML = `<div class="unavailable"><div class="card"><h1 style="font-size:1.2rem">Une erreur est survenue.</h1>
+          <button class="btn mt-2" onclick="location.reload()">Réessayer</button></div></div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

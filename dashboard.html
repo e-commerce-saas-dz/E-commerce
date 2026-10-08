@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tableau de bord</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+  <script src="assets/app.js"></script>
+  <style>
+    .store-hero { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    .store-hero img, .store-hero .ph { width: 64px; height: 64px; border-radius: 14px; object-fit: cover; border: 1px solid var(--border); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.4rem; color: var(--muted); }
+    .qr-box { display: flex; justify-content: center; padding: 1rem; background: #fff; border: 1px solid var(--border); border-radius: var(--radius); }
+    .qr-box img { width: 240px; height: 240px; image-rendering: pixelated; }
+    .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    @media (min-width: 900px) { .theme-grid { grid-template-columns: repeat(4, 1fr); } }
+    .theme-card { border: 2px solid var(--border); border-radius: var(--radius); padding: .75rem; cursor: pointer; background: var(--surface); text-align: left; font: inherit; }
+    .theme-card.selected { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+    .theme-card .swatches { display: flex; gap: 4px; margin-bottom: .5rem; }
+    .theme-card .swatches span { width: 20px; height: 20px; border-radius: 6px; border: 1px solid rgba(0,0,0,.08); }
+    .preview { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .preview .p-head { padding: .9rem 1rem; display: flex; align-items: center; gap: .6rem; }
+    .preview .p-body { padding: 1rem; }
+    .preview .p-btn { display: inline-block; padding: .5rem .9rem; border-radius: 8px; font-weight: 600; font-size: .85rem; }
+    .usage { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin-top: .4rem; }
+    .usage span { display: block; height: 100%; background: var(--primary); }
+    .bell { position: relative; }
+    .bell .dot { position: absolute; top: 6px; right: 6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: var(--danger); color: #fff; font-size: .65rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+    .notif { padding: .7rem 0; border-bottom: 1px solid var(--border); }
+    .notif.unread .title { font-weight: 700; }
+    .order-items td, .order-items th { padding: .4rem 0; }
+  </style>
+</head>
+<body class="has-bottom-nav">
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a href="#overview" class="logo-mark"><span class="dot">S</span><span class="app-name"></span></a>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-footer">
+        <button class="btn btn-sm btn-block mb-2 hidden" id="install-btn"></button>
+        <div class="small muted mb-1" id="user-email"></div>
+        <div class="nav"><button id="logout-btn"></button></div>
+      </div>
+    </aside>
+    <div class="sidebar-backdrop hidden" id="sidebar-backdrop"></div>
+
+    <div class="app-content">
+      <header class="topbar">
+        <button class="btn btn-ghost btn-icon menu-toggle" id="menu-toggle" aria-label="Menu"></button>
+        <strong id="topbar-title" class="grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></strong>
+        <a class="btn btn-sm" id="view-store-top" target="_blank" rel="noopener"></a>
+        <button class="btn btn-ghost btn-icon bell" id="bell" aria-label="Notifications"></button>
+      </header>
+      <div id="expiry-banner"></div>
+      <main class="main" id="main"><div class="page-loader"><div class="spinner"></div></div></main>
+    </div>
+    <nav class="bottom-nav" id="bottom-nav"></nav>
+  </div>
+
+  <script>
+    /* =========================================================================
+       DASHBOARD COMMERÇANT
+       La boutique vient TOUJOURS de l'utilisateur connecté (getCurrentStore),
+       jamais d'un paramètre d'URL : dashboard.html?store=XXX est ignoré.
+       Et même si ce JS était modifié, la RLS de Supabase refuserait l'accès.
+       ========================================================================= */
+    const PAGE_SIZE = 20;
+    const S = { status: null, store: null, settings: null, categories: [] };
+    const main = document.getElementById("main");
+
+    const NAV = [
+      ["overview", "home", "Tableau de bord"],
+      ["store", "store", "Ma boutique"],
+      ["products", "box", "Produits"],
+      ["categories", "tag", "Catégories"],
+      ["orders", "cart", "Commandes"],
+      ["customers", "users", "Clients"],
+      ["customize", "palette", "Personnalisation"],
+      ["settings", "settings", "Paramètres"],
+      ["subscription", "card", "Abonnement"],
+    ];
+    const BOTTOM_NAV = [["overview", "home", "Accueil"], ["products", "box", "Produits"], ["orders", "cart", "Commandes"], ["store", "store", "Boutique"]];
+
+    const THEMES = {
+      classic: { label: "Classic", primary_color: "#1f2937", secondary_color: "#b45309", text_color: "#1f2937", button_color: "#1f2937", background_color: "#faf7f2" },
+      modern:  { label: "Modern",  primary_color: "#111827", secondary_color: "#6366f1", text_color: "#111827", button_color: "#111827", background_color: "#ffffff" },
+      minimal: { label: "Minimal", primary_color: "#000000", secondary_color: "#737373", text_color: "#171717", button_color: "#000000", background_color: "#ffffff" },
+      elegant: { label: "Elegant", primary_color: "#3f2d20", secondary_color: "#c8a165", text_color: "#2b211a", button_color: "#3f2d20", background_color: "#fbf8f3" },
+    };
+    const COLOR_FIELDS = [
+      ["primary_color", "Couleur principale"], ["secondary_color", "Couleur secondaire"],
+      ["text_color", "Couleur du texte"], ["button_color", "Couleur des boutons"], ["background_color", "Couleur de fond"],
+    ];
+
+    const price = (v) => formatPrice(v, (S.settings && S.settings.currency) || "DZD");
+
+    /* ----------------------------- Coquille --------------------------------- */
+    function renderShell() {
+      document.querySelectorAll(".app-name").forEach((el) => (el.textContent = APP_NAME));
+      document.getElementById("nav").innerHTML = NAV.map(([r, ic, l]) =>
+        `<a href="#${r}" data-route="${r}">${icon(ic)}<span>${l}</span>${r === "orders" ? '<span class="badge badge-info count hidden" data-new-orders></span>' : ""}</a>`).join("");
+      document.getElementById("bottom-nav").innerHTML = BOTTOM_NAV.map(([r, ic, l]) =>
+        `<a href="#${r}" data-route="${r}">${icon(ic)}<span>${l}</span></a>`).join("")
+        + `<a href="#" id="bottom-menu">${icon("menu")}<span>Menu</span></a>`;
+      document.getElementById("bottom-menu").onclick = (e) => { e.preventDefault(); toggleSidebar(true); };
+      document.getElementById("logout-btn").innerHTML = `${icon("logout")}<span>Se déconnecter</span>`;
+      document.getElementById("logout-btn").onclick = logout;
+      document.getElementById("menu-toggle").innerHTML = icon("menu");
+      document.getElementById("menu-toggle").onclick = () => toggleSidebar(true);
+      document.getElementById("sidebar-backdrop").onclick = () => toggleSidebar(false);
+      const top = document.getElementById("view-store-top");
+      top.href = getStoreUrl(S.store.id);
+      top.innerHTML = `${icon("external")}<span class="hide-sm">Voir ma boutique</span>`;
+      document.getElementById("bell").innerHTML = icon("bell") + '<span class="dot hidden" id="bell-dot"></span>';
+      document.getElementById("bell").onclick = openNotifications;
+      renderExpiryBanner();
+    }
+    function toggleSidebar(open) {
+      document.getElementById("sidebar").classList.toggle("open", open);
+      document.getElementById("sidebar-backdrop").classList.toggle("hidden", !open);
+    }
+    function setActive(route, title) {
+      document.querySelectorAll("[data-route]").forEach((a) => a.classList.toggle("active", a.dataset.route === route));
+      document.getElementById("topbar-title").textContent = title;
+      document.title = title + " · " + S.store.name;
+      toggleSidebar(false);
+    }
+    function renderExpiryBanner() {
+      const d = S.status.days_left;
+      const box = document.getElementById("expiry-banner");
+      if (d === null || d > 7) { box.innerHTML = ""; return; }
+      const m = expiryMessage(d);
+      box.innerHTML = `<div class="alert alert-${m.level === "danger" ? "danger" : "warning"}" style="margin:0;border-radius:0;border-width:0 0 1px">
+        ${escapeHtml(m.text)} <a href="#subscription">Renouveler</a></div>`;
+    }
+
+    async function router() {
+      const route = (location.hash.slice(1) || "overview").split("/")[0];
+      main.innerHTML = '<div class="page-loader"><div class="spinner"></div></div>';
+      window.scrollTo(0, 0);
+      const routes = { overview: renderOverview, store: renderStore, products: renderProducts, categories: renderCategories,
+                       orders: renderOrders, customers: renderCustomers, customize: renderCustomize,
+                       settings: renderSettings, subscription: renderSubscription };
+      try {
+        await (routes[route] || renderOverview)();
+      } catch (e) {
+        console.error(e);
+        // Abonnement devenu inactif pendant la session : la base refuse, on renvoie vers la page d'état.
+        const st = await getAccountStatus().catch(() => null);
+        if (st && st.state !== "active") return window.location.replace("pending.html");
+        main.innerHTML = `<div class="card empty">Une erreur est survenue. <br><button class="btn btn-sm mt-1" onclick="router()">Réessayer</button></div>`;
+      }
+    }
+
+    function pageHeader(title, actions = "") {
+      return `<div class="page-title"><h1>${escapeHtml(title)}</h1><div class="row">${actions}</div></div>`;
+    }
+    function pagination(total, page) {
+      const pages = Math.ceil(total / PAGE_SIZE);
+      if (pages <= 1) return total ? `<p class="small muted mt-2 mb-0">${total} élément(s)</p>` : "";
+      return `<div class="pagination"><span class="small muted">${total} · page ${page + 1}/${pages}</span>
+        <button class="btn btn-sm" data-page="${page - 1}" ${page === 0 ? "disabled" : ""}>Précédent</button>
+        <button class="btn btn-sm" data-page="${page + 1}" ${page + 1 >= pages ? "disabled" : ""}>Suivant</button></div>`;
+    }
+    function bindPagination(box, go) { box.querySelectorAll("[data-page]").forEach((b) => (b.onclick = () => go(Number(b.dataset.page)))); }
+    // Nettoie une saisie de recherche avant de l'utiliser dans un filtre PostgREST.
+    const cleanSearch = (q) => (q || "").replace(/[,()*%"\\]/g, " ").trim();
+
+    /* ----------------------------- Notifications ---------------------------- */
+    async function refreshBadges() {
+      try {
+        const [n, o] = await Promise.all([
+          sb.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", S.status.user_id).eq("is_read", false),
+          sb.from("orders").select("id", { count: "exact", head: true }).eq("store_id", S.store.id).eq("status", "new"),
+        ]);
+        const dot = document.getElementById("bell-dot");
+        dot.textContent = n.count || ""; dot.classList.toggle("hidden", !n.count);
+        document.querySelectorAll("[data-new-orders]").forEach((el) => { el.textContent = o.count || ""; el.classList.toggle("hidden", !o.count); });
+      } catch (e) { console.error(e); }
+    }
+    async function openNotifications() {
+      try {
+        const { data, error } = await sb.from("notifications").select("*").eq("user_id", S.status.user_id)
+          .order("created_at", { ascending: false }).limit(30);
+        if (error) throw error;
+        openModal({
+          title: "Notifications",
+          body: data.length ? data.map((n) => `<div class="notif ${n.is_read ? "" : "unread"}">
+              <div class="title">${escapeHtml(n.title)}</div>
+              ${n.message ? `<div class="small muted">${escapeHtml(n.message)}</div>` : ""}
+              <div class="small muted">${formatDateTime(n.created_at)}</div></div>`).join("")
+            : '<p class="muted">Aucune notification.</p>',
+        });
+        if (data.some((n) => !n.is_read)) {
+          await sb.from("notifications").update({ is_read: true }).eq("user_id", S.status.user_id).eq("is_read", false);
+          refreshBadges();
+        }
+      } catch (e) { handleError(e); }
+    }
+
+    /* ----------------------------- Tableau de bord -------------------------- */
+    async function renderOverview() {
+      setActive("overview", "Tableau de bord");
+      const [{ data: st, error }, recent] = await Promise.all([
+        sb.rpc("store_dashboard_stats"),
+        sb.from("orders").select("id, order_number, customer_name, total, status, created_at")
+          .eq("store_id", S.store.id).order("created_at", { ascending: false }).limit(5),
+      ]);
+      if (error) throw error;
+      if (recent.error) throw recent.error;
+      const exp = expiryMessage(S.status.days_left);
+      const tile = (label, value, href) => `<a class="card stat" href="${href}" style="text-decoration:none;color:inherit"><span class="label">${label}</span><span class="value">${value}</span></a>`;
+      main.innerHTML = `
+        ${pageHeader("Bonjour " + (S.status.first_name || ""), `<a class="btn btn-primary" href="#products" data-new-product>${icon("plus")} Ajouter un produit</a>`)}
+        <div class="stats">
+          ${tile("Produits", st.products, "#products")}
+          ${tile("Commandes", st.orders, "#orders")}
+          ${tile("Clients", st.customers, "#customers")}
+          ${tile("En rupture", st.out_of_stock, "#products")}
+        </div>
+        <div class="grid cols-2 mt-2">
+          <div class="card">
+            <div class="card-header"><h2>Chiffre d'affaires</h2><span class="small muted">hors commandes annulées</span></div>
+            <div class="stat"><span class="value">${price(st.revenue)}</span>
+            <span class="label">dont livré : ${price(st.revenue_delivered)}</span></div>
+            ${st.new_orders ? `<a class="btn btn-sm mt-2" href="#orders">${st.new_orders} nouvelle(s) commande(s) à traiter</a>` : ""}
+          </div>
+          <div class="card">
+            <div class="card-header"><h2>Abonnement</h2><a class="btn btn-sm" href="#subscription">Détails</a></div>
+            <dl class="kv"><dt>Formule</dt><dd>${escapeHtml(S.status.plan_name || "—")}</dd>
+              <dt>Expiration</dt><dd>${formatDate(S.status.end_date)}</dd>
+              <dt>Jours restants</dt><dd>${S.status.days_left ?? "—"}</dd></dl>
+            ${exp.text ? `<div class="alert alert-${exp.level} mt-2 mb-0">${escapeHtml(exp.text)}</div>` : ""}
+          </div>
+        </div>
+        <div class="card mt-2">
+          <div class="card-header"><h2>Dernières commandes</h2><a class="btn btn-sm" href="#orders">Tout voir</a></div>
+          ${recent.data.length ? `<div class="table-wrap"><table class="table"><tbody>${recent.data.map((o) => `<tr>
+              <td class="cell-main" data-label="">#${o.order_number} · ${escapeHtml(o.customer_name)}</td>
+              <td data-label="Date">${formatDateTime(o.created_at)}</td>
+              <td data-label="Total" class="nowrap">${price(o.total)}</td>
+              <td data-label="Statut">${orderBadge(o.status)}</td></tr>`).join("")}</tbody></table></div>`
+            : `<div class="empty">${icon("cart")}Pas encore de commande. Partagez le lien de votre boutique !<br>
+               <a class="btn btn-sm mt-2" href="#store">${icon("share")} Partager ma boutique</a></div>`}
+        </div>`;
+      main.querySelector("[data-new-product]").onclick = () => { sessionStorage.setItem("openNewProduct", "1"); };
+    }
+
+    /* ----------------------------- Ma boutique ------------------------------ */
+    function renderStore() {
+      setActive("store", "Ma boutique");
+      const url = getStoreUrl(S.store.id);
+      main.innerHTML = `
+        ${pageHeader("Ma boutique")}
+        <div class="card">
+          <div class="store-hero mb-2">
+            ${S.store.logo_url ? `<img src="${escapeHtml(S.store.logo_url)}" alt="">` : `<div class="ph">${escapeHtml(S.store.name.charAt(0).toUpperCase())}</div>`}
+            <div><h2 class="mb-0">${escapeHtml(S.store.name)}</h2><div class="muted small">${escapeHtml(S.store.slogan || S.store.business_type || "")}</div></div>
+          </div>
+          <label class="small muted" style="font-weight:600">Lien de votre boutique</label>
+          <div class="link-box mt-1"><span class="grow">${escapeHtml(url)}</span></div>
+          <div class="row mt-2">
+            <a class="btn btn-primary" href="${escapeHtml(url)}" target="_blank" rel="noopener">${icon("external")} Voir ma boutique</a>
+            <button class="btn" id="copy-link">${icon("copy")} Copier le lien</button>
+            <button class="btn" id="share-link">${icon("share")} Partager</button>
+            <button class="btn" id="qr-link">${icon("qr")} QR Code</button>
+          </div>
+        </div>
+        <div class="grid cols-3 mt-2">
+          <a class="card" href="#customize" style="color:inherit;text-decoration:none">${icon("palette")}<h3 class="mt-1">Personnaliser</h3><p class="muted small mb-0">Logo, couleurs, thème, bannière.</p></a>
+          <a class="card" href="#products" style="color:inherit;text-decoration:none">${icon("box")}<h3 class="mt-1">Ajouter des produits</h3><p class="muted small mb-0">Photos, prix, stock, promotions.</p></a>
+          <a class="card" href="#settings" style="color:inherit;text-decoration:none">${icon("settings")}<h3 class="mt-1">Paramètres</h3><p class="muted small mb-0">Contact, livraison, WhatsApp, SEO.</p></a>
+        </div>`;
+      document.getElementById("copy-link").onclick = () => copyStoreUrl(S.store.id);
+      document.getElementById("share-link").onclick = () => shareStore(S.store.id, S.store.name);
+      document.getElementById("qr-link").onclick = openQr;
+    }
+
+    async function openQr() {
+      try {
+        const url = getStoreUrl(S.store.id);
+        const dataUrl = await makeQrDataUrl(url, 10);
+        const modal = openModal({
+          title: "QR Code de la boutique",
+          body: `<div class="qr-box"><img src="${dataUrl}" alt="QR code"></div>
+            <p class="small muted center mt-1" style="word-break:break-all">${escapeHtml(url)}</p>
+            <p class="small muted center">À imprimer sur vos cartes de visite, affiches, flyers, emballages, ou à publier sur Instagram.</p>
+            <div class="modal-footer"><button class="btn" id="qr-print">Imprimer</button>
+              <a class="btn btn-primary" href="${dataUrl}" download="qr-${escapeHtml(S.store.slug || "boutique")}.png">Télécharger (PNG)</a></div>`,
+        });
+        modal.querySelector("#qr-print").onclick = () => {
+          const w = window.open("", "_blank");
+          if (!w) return;
+          w.document.write(`<html><head><title>QR</title></head><body style="text-align:center;font-family:sans-serif">
+            <h2>${escapeHtml(S.store.name)}</h2><img src="${dataUrl}" style="width:300px"><p>${escapeHtml(url)}</p>
+            <script>onload=()=>print()<\/script></body></html>`);
+          w.document.close();
+        };
+      } catch (e) { handleError(e); }
+    }
+
+    /* ----------------------------- Produits --------------------------------- */
+    const prodQuery = { search: "", category: "", filter: "", page: 0 };
+
+    async function loadCategoriesList() {
+      const { data, error } = await sb.from("categories").select("id, name, is_active, sort_order")
+        .eq("store_id", S.store.id).order("sort_order").order("name");
+      if (error) throw error;
+      S.categories = data;
+      return data;
+    }
+
+    async function renderProducts() {
+      setActive("products", "Produits");
+      await loadCategoriesList();
+      main.innerHTML = `
+        ${pageHeader("Produits", `<button class="btn btn-primary" id="new-product">${icon("plus")} Ajouter un produit</button>`)}
+        <div id="limit-box"></div>
+        <div class="card">
+          <form class="row mb-2" id="prod-filters">
+            <input class="input grow" style="min-width:180px" type="search" name="search" placeholder="Nom ou référence…" value="${escapeHtml(prodQuery.search)}">
+            <select class="input" name="category" style="width:auto">
+              <option value="">Toutes les catégories</option>
+              ${S.categories.map((c) => `<option value="${c.id}" ${c.id === prodQuery.category ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
+            </select>
+            <select class="input" name="filter" style="width:auto">
+              ${[["", "Tous"], ["active", "Actifs"], ["inactive", "Inactifs"], ["featured", "Vedettes"], ["out", "En rupture"]]
+                .map(([v, l]) => `<option value="${v}" ${v === prodQuery.filter ? "selected" : ""}>${l}</option>`).join("")}
+            </select>
+            <button class="btn" type="submit">${icon("search")}</button>
+          </form>
+          <div id="prod-table"></div>
+        </div>`;
+      const form = document.getElementById("prod-filters");
+      form.addEventListener("submit", (e) => { e.preventDefault(); Object.assign(prodQuery, formData(form), { page: 0 }); loadProducts(); });
+      form.category.onchange = form.filter.onchange = () => form.requestSubmit();
+      document.getElementById("new-product").onclick = async () => {
+        // Confort : prévenir avant de remplir le formulaire. La base refuse de toute façon au-delà de la limite.
+        try {
+          const lim = await productLimitInfo();
+          if (lim.max !== null && lim.count >= lim.max) return showToast(friendlyError({ message: "PLAN_LIMIT_PRODUCTS:" + lim.max }), "error", 6000);
+        } catch (e) { console.error(e); }
+        openProduct(null);
+      };
+      await loadProducts();
+      if (sessionStorage.getItem("openNewProduct")) { sessionStorage.removeItem("openNewProduct"); openProduct(null); }
+    }
+
+    async function productLimitInfo() {
+      const { count, error } = await sb.from("products").select("id", { count: "exact", head: true }).eq("store_id", S.store.id);
+      if (error) throw error;
+      return { count, max: S.status.max_products };
+    }
+
+    async function loadProducts() {
+      const box = document.getElementById("prod-table");
+      box.innerHTML = '<div class="page-loader" style="min-height:120px"><div class="spinner"></div></div>';
+      try {
+        const lim = await productLimitInfo();
+        const reached = lim.max !== null && lim.count >= lim.max;
+        document.getElementById("limit-box").innerHTML = lim.max !== null ? `
+          <div class="alert ${reached ? "alert-warning" : "alert-info"}">${lim.count} / ${lim.max} produits utilisés.
+          ${reached ? `Votre abonnement actuel autorise ${lim.max} produits. Veuillez changer de formule pour ajouter davantage de produits.` : ""}</div>` : "";
+
+        let q = sb.from("products").select("*, category:categories(name)", { count: "exact" }).eq("store_id", S.store.id);
+        const s = cleanSearch(prodQuery.search);
+        if (s) q = q.or(`name.ilike.%${s}%,sku.ilike.%${s}%`);
+        if (prodQuery.category) q = q.eq("category_id", prodQuery.category);
+        if (prodQuery.filter === "active") q = q.eq("is_active", true);
+        if (prodQuery.filter === "inactive") q = q.eq("is_active", false);
+        if (prodQuery.filter === "featured") q = q.eq("is_featured", true);
+        if (prodQuery.filter === "out") q = q.eq("track_stock", true).eq("stock", 0);
+        const from = prodQuery.page * PAGE_SIZE;
+        const { data, error, count } = await q.order("created_at", { ascending: false }).range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data.length) {
+          box.innerHTML = `<div class="empty">${icon("box")}${lim.count ? "Aucun produit ne correspond." : "Aucun produit pour le moment."}</div>`;
+          return;
+        }
+        box.innerHTML = `<div class="table-wrap"><table class="table">
+          <thead><tr><th></th><th>Produit</th><th>Prix</th><th>Stock</th><th>Catégorie</th><th>Statut</th><th class="text-right">Actions</th></tr></thead>
+          <tbody>${data.map((p) => `<tr>
+            <td data-label="" style="width:56px">${p.image_url ? `<img class="thumb" src="${escapeHtml(p.image_url)}" alt="" loading="lazy">` : '<div class="thumb"></div>'}</td>
+            <td class="cell-main" data-label=""><span>${escapeHtml(p.name)}${p.is_featured ? ' <span class="badge badge-primary">Vedette</span>' : ""}
+              ${p.sku ? `<div class="small muted">Réf. ${escapeHtml(p.sku)}</div>` : ""}</span></td>
+            <td data-label="Prix" class="nowrap"><span>${price(p.price)}${p.old_price ? `<div class="small muted"><s>${price(p.old_price)}</s></div>` : ""}</span></td>
+            <td data-label="Stock">${!p.track_stock ? '<span class="muted">Non suivi</span>' : p.stock === 0 ? '<span class="badge badge-danger">Rupture</span>' : p.stock}</td>
+            <td data-label="Catégorie">${escapeHtml((p.category && p.category.name) || "—")}</td>
+            <td data-label="Statut">${p.is_active ? '<span class="badge badge-success">Actif</span>' : '<span class="badge">Inactif</span>'}</td>
+            <td data-label=""><div class="actions"><button class="btn btn-sm" data-edit="${p.id}">${icon("edit")} Modifier</button>
+              <button class="btn btn-sm btn-danger" data-del="${p.id}" aria-label="Supprimer">${icon("trash")}</button></div></td></tr>`).join("")}</tbody>
+          </table></div>${pagination(count, prodQuery.page)}`;
+        bindPagination(box, (p) => { prodQuery.page = p; loadProducts(); });
+        box.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => openProduct(data.find((p) => p.id === b.dataset.edit))));
+        box.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
+          const p = data.find((x) => x.id === b.dataset.del);
+          if (!(await confirmAction(`Supprimer le produit « ${p.name} » ? Cette action est définitive.`, { confirmText: "Supprimer" }))) return;
+          const { error: err } = await sb.from("products").delete().eq("id", p.id).eq("store_id", S.store.id);
+          if (err) return handleError(err);
+          showToast("Produit supprimé.", "success"); loadProducts();
+        }));
+      } catch (e) { handleError(e); box.innerHTML = '<div class="empty">Impossible de charger les produits.</div>'; }
+    }
+
+    function imageField(name, label, value, wide) {
+      return `<div class="field"><label>${label}</label><div class="uploader">
+        <img class="preview ${wide ? "wide" : ""}" data-preview="${name}" src="${escapeHtml(value || "")}" alt="" ${value ? "" : 'style="visibility:hidden"'}>
+        <input type="hidden" name="${name}" value="${escapeHtml(value || "")}">
+        <label class="btn btn-sm">${icon("plus")} Choisir une image<input type="file" accept="image/png,image/jpeg,image/webp" data-upload="${name}" hidden></label>
+        <button type="button" class="btn btn-sm btn-ghost ${value ? "" : "hidden"}" data-clear="${name}">Retirer</button></div></div>`;
+    }
+    // Branche les champs image d'un formulaire : upload vers Storage dans le dossier de la boutique.
+    function bindImageFields(form, bucket, maxSize) {
+      form.querySelectorAll("[data-upload]").forEach((input) => input.addEventListener("change", async () => {
+        const file = input.files[0]; if (!file) return;
+        const name = input.dataset.upload;
+        const label = input.closest("label"); label.setAttribute("aria-busy", "true");
+        try {
+          const url = await uploadImage(input.dataset.bucket || bucket, S.store.id, file, maxSize);
+          form.querySelector(`input[name="${name}"]`).value = url;
+          const img = form.querySelector(`[data-preview="${name}"]`); img.src = url; img.style.visibility = "visible";
+          form.querySelector(`[data-clear="${name}"]`).classList.remove("hidden");
+        } catch (e) { handleError(e, "Impossible d'envoyer l'image."); }
+        finally { label.removeAttribute("aria-busy"); input.value = ""; }
+      }));
+      form.querySelectorAll("[data-clear]").forEach((b) => (b.onclick = () => {
+        form.querySelector(`input[name="${b.dataset.clear}"]`).value = "";
+        form.querySelector(`[data-preview="${b.dataset.clear}"]`).style.visibility = "hidden";
+        b.classList.add("hidden");
+      }));
+    }
+
+    function openProduct(p) {
+      const v = p || { name: "", description: "", price: "", old_price: "", stock: 1, track_stock: true, sku: "", category_id: "", image_url: "", images: [], is_featured: false, is_active: true };
+      let images = [...(v.images || [])];
+      const modal = openModal({
+        title: p ? "Modifier le produit" : "Nouveau produit", size: "lg",
+        body: `<form novalidate>
+          <div class="form-grid cols-2">
+            <div class="field span-2"><label>Nom *</label><input class="input" name="name" value="${escapeHtml(v.name)}" maxlength="150" required></div>
+            <div class="field"><label>Prix *</label><input class="input" name="price" type="number" min="0" step="0.01" inputmode="decimal" value="${v.price}" required></div>
+            <div class="field"><label>Ancien prix</label><input class="input" name="old_price" type="number" min="0" step="0.01" inputmode="decimal" value="${v.old_price ?? ""}">
+              <span class="hint">Affiché barré (promotion).</span></div>
+            <div class="field"><label>Stock</label><input class="input" name="stock" type="number" min="0" step="1" inputmode="numeric" value="${v.stock}"></div>
+            <div class="field"><label>Référence</label><input class="input" name="sku" value="${escapeHtml(v.sku || "")}" maxlength="60"></div>
+            <div class="field span-2"><label>Catégorie</label><select class="input" name="category_id"><option value="">Sans catégorie</option>
+              ${S.categories.map((c) => `<option value="${c.id}" ${c.id === v.category_id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}</select></div>
+            <div class="field span-2"><label>Description</label><textarea class="input" name="description" maxlength="5000">${escapeHtml(v.description || "")}</textarea></div>
+          </div>
+          ${imageField("image_url", "Image principale", v.image_url)}
+          <div class="field"><label>Images supplémentaires (8 max)</label>
+            <div class="gallery" id="gallery"></div>
+            <label class="btn btn-sm mt-1" id="add-image-btn" style="align-self:flex-start">${icon("plus")} Ajouter des images<input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden id="add-images"></label></div>
+          <div class="stack">
+            <label class="checkbox"><input type="checkbox" name="track_stock" ${v.track_stock ? "checked" : ""}> Suivre le stock (bloque les commandes en rupture)</label>
+            <label class="checkbox"><input type="checkbox" name="is_featured" ${v.is_featured ? "checked" : ""}> Produit vedette</label>
+            <label class="checkbox"><input type="checkbox" name="is_active" ${v.is_active ? "checked" : ""}> Actif (visible dans la boutique)</label>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      bindImageFields(form, "products");
+      const renderGallery = () => {
+        modal.querySelector("#gallery").innerHTML = images.map((u, i) => `<div class="item"><img src="${escapeHtml(u)}" alt=""><button type="button" data-rm="${i}" aria-label="Retirer">×</button></div>`).join("");
+        modal.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { images.splice(Number(b.dataset.rm), 1); renderGallery(); }));
+        modal.querySelector("#add-image-btn").classList.toggle("hidden", images.length >= 8);
+      };
+      renderGallery();
+      modal.querySelector("#add-images").addEventListener("change", async (e) => {
+        const files = [...e.target.files].slice(0, 8 - images.length);
+        const label = modal.querySelector("#add-image-btn"); label.setAttribute("aria-busy", "true");
+        for (const f of files) {
+          try { images.push(await uploadImage("products", S.store.id, f)); renderGallery(); }
+          catch (err) { handleError(err, "Impossible d'envoyer l'image."); }
+        }
+        label.removeAttribute("aria-busy"); e.target.value = "";
+      });
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        if (!d.name) return showToast("Le nom est obligatoire.", "error");
+        if (d.price === "" || Number(d.price) < 0) return showToast("Indiquez un prix valide.", "error");
+        const row = {
+          name: d.name, description: d.description || null, price: Number(d.price),
+          old_price: d.old_price === "" ? null : Number(d.old_price),
+          stock: Math.max(0, parseInt(d.stock || "0", 10)), track_stock: d.track_stock,
+          sku: d.sku || null, category_id: d.category_id || null, image_url: d.image_url || null,
+          images, is_featured: d.is_featured, is_active: d.is_active,
+        };
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = p
+              ? await sb.from("products").update(row).eq("id", p.id).eq("store_id", S.store.id)
+              : await sb.from("products").insert({ ...row, store_id: S.store.id });
+            if (error) throw error;
+            closeModal(); showToast(p ? "Produit modifié." : "Produit ajouté.", "success"); loadProducts();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    /* ----------------------------- Catégories ------------------------------- */
+    async function renderCategories() {
+      setActive("categories", "Catégories");
+      const { data, error } = await sb.from("categories").select("*, products(count)")
+        .eq("store_id", S.store.id).order("sort_order").order("name");
+      if (error) throw error;
+      S.categories = data;
+      const max = S.status.max_categories;
+      main.innerHTML = `
+        ${pageHeader("Catégories", `<button class="btn btn-primary" id="new-cat">${icon("plus")} Ajouter une catégorie</button>`)}
+        ${max !== null ? `<div class="alert ${data.length >= max ? "alert-warning" : "alert-info"}">${data.length} / ${max} catégories utilisées.</div>` : ""}
+        <div class="card">${data.length ? `<div class="table-wrap"><table class="table">
+          <thead><tr><th></th><th>Nom</th><th>Produits</th><th>Ordre</th><th>Statut</th><th class="text-right">Actions</th></tr></thead>
+          <tbody>${data.map((c) => `<tr>
+            <td data-label="" style="width:56px">${c.image_url ? `<img class="thumb" src="${escapeHtml(c.image_url)}" alt="">` : '<div class="thumb"></div>'}</td>
+            <td class="cell-main" data-label=""><span>${escapeHtml(c.name)}${c.description ? `<div class="small muted">${escapeHtml(c.description)}</div>` : ""}</span></td>
+            <td data-label="Produits">${(c.products && c.products[0] && c.products[0].count) || 0}</td>
+            <td data-label="Ordre">${c.sort_order}</td>
+            <td data-label="Statut">${c.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge">Inactive</span>'}</td>
+            <td data-label=""><div class="actions"><button class="btn btn-sm" data-edit="${c.id}">${icon("edit")} Modifier</button>
+              <button class="btn btn-sm btn-danger" data-del="${c.id}" aria-label="Supprimer">${icon("trash")}</button></div></td></tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">${icon("tag")}Aucune catégorie. Les catégories aident vos clients à trouver vos produits.</div>`}</div>`;
+      document.getElementById("new-cat").onclick = () => (max !== null && data.length >= max)
+        ? showToast(friendlyError({ message: "PLAN_LIMIT_CATEGORIES:" + max }), "error", 6000) : openCategory(null);
+      main.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => openCategory(data.find((c) => c.id === b.dataset.edit))));
+      main.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
+        const c = data.find((x) => x.id === b.dataset.del);
+        if (!(await confirmAction(`Supprimer la catégorie « ${c.name} » ? Ses produits seront conservés, sans catégorie.`, { confirmText: "Supprimer" }))) return;
+        const { error: err } = await sb.from("categories").delete().eq("id", c.id).eq("store_id", S.store.id);
+        if (err) return handleError(err);
+        showToast("Catégorie supprimée.", "success"); renderCategories();
+      }));
+    }
+
+    function openCategory(c) {
+      const v = c || { name: "", description: "", image_url: "", sort_order: S.categories.length + 1, is_active: true };
+      const modal = openModal({
+        title: c ? "Modifier la catégorie" : "Nouvelle catégorie",
+        body: `<form novalidate>
+          <div class="field"><label>Nom *</label><input class="input" name="name" value="${escapeHtml(v.name)}" maxlength="80" required></div>
+          <div class="field"><label>Description</label><textarea class="input" name="description" maxlength="1000">${escapeHtml(v.description || "")}</textarea></div>
+          ${imageField("image_url", "Image", v.image_url)}
+          <div class="field"><label>Ordre d'affichage</label><input class="input" name="sort_order" type="number" value="${v.sort_order}"></div>
+          <label class="checkbox"><input type="checkbox" name="is_active" ${v.is_active ? "checked" : ""}> Active (visible dans la boutique)</label>
+          <div class="modal-footer"><button type="button" class="btn" data-close>Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer</button></div></form>`,
+      });
+      const form = modal.querySelector("form");
+      bindImageFields(form, "products", 800);
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        if (!d.name) return showToast("Le nom est obligatoire.", "error");
+        const row = { name: d.name, description: d.description || null, image_url: d.image_url || null,
+                      sort_order: Number(d.sort_order || 0), is_active: d.is_active };
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = c
+              ? await sb.from("categories").update(row).eq("id", c.id).eq("store_id", S.store.id)
+              : await sb.from("categories").insert({ ...row, store_id: S.store.id });
+            if (error) throw error;
+            closeModal(); showToast("Catégorie enregistrée.", "success"); renderCategories();
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    /* ----------------------------- Commandes -------------------------------- */
+    const orderQuery = { status: "", search: "", page: 0 };
+
+    async function renderOrders() {
+      setActive("orders", "Commandes");
+      main.innerHTML = `
+        ${pageHeader("Commandes")}
+        <div class="card">
+          <form class="row mb-2" id="order-filters">
+            <input class="input grow" style="min-width:180px" type="search" name="search" placeholder="Nom ou téléphone du client…" value="${escapeHtml(orderQuery.search)}">
+            <select class="input" name="status" style="width:auto"><option value="">Tous les statuts</option>
+              ${Object.entries(ORDER_STATUS).map(([k, [l]]) => `<option value="${k}" ${k === orderQuery.status ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <button class="btn" type="submit">${icon("search")}</button>
+          </form>
+          <div id="orders-table"></div>
+        </div>`;
+      const form = document.getElementById("order-filters");
+      form.addEventListener("submit", (e) => { e.preventDefault(); Object.assign(orderQuery, formData(form), { page: 0 }); loadOrders(); });
+      form.status.onchange = () => form.requestSubmit();
+      await loadOrders();
+    }
+
+    async function loadOrders() {
+      const box = document.getElementById("orders-table");
+      box.innerHTML = '<div class="page-loader" style="min-height:120px"><div class="spinner"></div></div>';
+      try {
+        let q = sb.from("orders").select("*", { count: "exact" }).eq("store_id", S.store.id);
+        if (orderQuery.status) q = q.eq("status", orderQuery.status);
+        const s = cleanSearch(orderQuery.search);
+        if (s) q = q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%`);
+        const from = orderQuery.page * PAGE_SIZE;
+        const { data, error, count } = await q.order("created_at", { ascending: false }).range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data.length) { box.innerHTML = `<div class="empty">${icon("cart")}Aucune commande.</div>`; return; }
+        box.innerHTML = `<div class="table-wrap"><table class="table">
+          <thead><tr><th>N°</th><th>Client</th><th>Date</th><th>Total</th><th>Statut</th><th class="text-right"></th></tr></thead>
+          <tbody>${data.map((o) => `<tr>
+            <td class="cell-main" data-label="">#${o.order_number}${o.source === "whatsapp" ? ' <span class="badge badge-success">WhatsApp</span>' : ""}</td>
+            <td data-label="Client"><span>${escapeHtml(o.customer_name)}<div class="small muted">${escapeHtml(o.customer_phone)}</div></span></td>
+            <td data-label="Date">${formatDateTime(o.created_at)}</td>
+            <td data-label="Total" class="nowrap">${price(o.total)}</td>
+            <td data-label="Statut">${orderBadge(o.status)}</td>
+            <td data-label=""><div class="actions"><button class="btn btn-sm" data-open="${o.id}">${icon("eye")} Détails</button></div></td></tr>`).join("")}</tbody>
+          </table></div>${pagination(count, orderQuery.page)}`;
+        bindPagination(box, (p) => { orderQuery.page = p; loadOrders(); });
+        box.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openOrder(data.find((o) => o.id === b.dataset.open))));
+      } catch (e) { handleError(e); box.innerHTML = '<div class="empty">Impossible de charger les commandes.</div>'; }
+    }
+
+    async function openOrder(o) {
+      try {
+        const { data: items, error } = await sb.from("order_items").select("*").eq("order_id", o.id).eq("store_id", S.store.id);
+        if (error) throw error;
+        const wa = o.customer_whatsapp || o.customer_phone;
+        const modal = openModal({
+          title: `Commande #${o.order_number}`, size: "lg",
+          body: `<div class="row-between mb-2"><span class="muted small">${formatDateTime(o.created_at)}${o.source === "whatsapp" ? " · via WhatsApp" : ""}</span>${orderBadge(o.status)}</div>
+            <div class="grid cols-2">
+              <div><h3>Client</h3><dl class="kv">
+                <dt>Nom</dt><dd>${escapeHtml(o.customer_name)}</dd>
+                <dt>Téléphone</dt><dd>${escapeHtml(o.customer_phone)}</dd>
+                ${o.customer_whatsapp ? `<dt>WhatsApp</dt><dd>${escapeHtml(o.customer_whatsapp)}</dd>` : ""}
+                <dt>Adresse</dt><dd>${escapeHtml(o.customer_address || "—")}</dd>
+                ${o.comment ? `<dt>Commentaire</dt><dd>${escapeHtml(o.comment)}</dd>` : ""}</dl>
+                <div class="row mt-1"><a class="btn btn-sm" href="${telLink(o.customer_phone)}">${icon("phone")} Appeler</a>
+                  <a class="btn btn-sm btn-success" target="_blank" rel="noopener" href="${whatsappLink(wa, `Bonjour ${o.customer_name}, merci pour votre commande #${o.order_number} chez ${S.store.name}.`)}">${icon("whatsapp")} WhatsApp</a></div></div>
+              <div><h3>Articles</h3><table class="order-items" style="width:100%;font-size:.9rem">
+                ${items.map((i) => `<tr><td>${escapeHtml(i.product_name)} <span class="muted">× ${i.quantity}</span></td><td class="text-right nowrap">${price(i.line_total)}</td></tr>`).join("")}
+                <tr><td class="muted">Sous-total</td><td class="text-right">${price(o.subtotal)}</td></tr>
+                <tr><td class="muted">Livraison</td><td class="text-right">${price(o.delivery_fee)}</td></tr>
+                <tr><td><strong>Total</strong></td><td class="text-right"><strong>${price(o.total)}</strong></td></tr></table></div>
+            </div>
+            <form class="mt-2"><div class="field"><label>Statut de la commande</label>
+              <select class="input" name="status">${Object.entries(ORDER_STATUS).map(([k, [l]]) => `<option value="${k}" ${k === o.status ? "selected" : ""}>${l}</option>`).join("")}</select>
+              <span class="hint">Annuler une commande remet automatiquement les produits en stock.</span></div>
+              <div class="modal-footer"><button type="button" class="btn" data-close>Fermer</button>
+                <button class="btn btn-primary" type="submit">Enregistrer le statut</button></div></form>`,
+        });
+        const form = modal.querySelector("form");
+        form.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const status = form.status.value;
+          if (status === o.status) return closeModal();
+          if (status === "cancelled" && !(await confirmAction(`Annuler la commande #${o.order_number} ?`, { confirmText: "Annuler la commande" }))) return;
+          try {
+            const { error: err } = await sb.from("orders").update({ status }).eq("id", o.id).eq("store_id", S.store.id);
+            if (err) throw err;
+            closeModal(); showToast("Statut mis à jour.", "success"); loadOrders(); refreshBadges();
+          } catch (err) { handleError(err); }
+        });
+      } catch (e) { handleError(e); }
+    }
+
+    /* ----------------------------- Clients ---------------------------------- */
+    async function renderCustomers() {
+      setActive("customers", "Clients");
+      main.innerHTML = `${pageHeader("Clients")}
+        <div class="card"><form class="row mb-2" id="cust-filters">
+          <input class="input grow" type="search" name="search" placeholder="Nom ou téléphone…"><button class="btn" type="submit">${icon("search")}</button></form>
+          <div id="cust-table"></div></div>`;
+      let page = 0, search = "";
+      const box = document.getElementById("cust-table");
+      async function load() {
+        box.innerHTML = '<div class="page-loader" style="min-height:120px"><div class="spinner"></div></div>';
+        try {
+          let q = sb.from("customer_stats").select("*", { count: "exact" }).eq("store_id", S.store.id);
+          const s = cleanSearch(search);
+          if (s) q = q.or(`name.ilike.%${s}%,phone.ilike.%${s}%`);
+          const from = page * PAGE_SIZE;
+          const { data, error, count } = await q.order("last_order_at", { ascending: false, nullsFirst: false }).range(from, from + PAGE_SIZE - 1);
+          if (error) throw error;
+          if (!data.length) { box.innerHTML = `<div class="empty">${icon("users")}Vos clients apparaîtront ici après leur première commande.</div>`; return; }
+          box.innerHTML = `<div class="table-wrap"><table class="table">
+            <thead><tr><th>Nom</th><th>Téléphone</th><th>WhatsApp</th><th>Commandes</th><th>Total dépensé</th><th>Dernière commande</th><th></th></tr></thead>
+            <tbody>${data.map((c) => `<tr>
+              <td class="cell-main" data-label="">${escapeHtml(c.name)}</td>
+              <td data-label="Téléphone"><a href="${telLink(c.phone)}">${escapeHtml(c.phone)}</a></td>
+              <td data-label="WhatsApp">${escapeHtml(c.whatsapp || "—")}</td>
+              <td data-label="Commandes">${c.orders_count}</td>
+              <td data-label="Total dépensé" class="nowrap">${price(c.total_spent)}</td>
+              <td data-label="Dernière commande">${formatDate(c.last_order_at)}</td>
+              <td data-label=""><div class="actions"><a class="btn btn-sm btn-success" target="_blank" rel="noopener" href="${whatsappLink(c.whatsapp || c.phone, `Bonjour ${c.name}, `)}">${icon("whatsapp")}</a></div></td></tr>`).join("")}</tbody>
+            </table></div>${pagination(count, page)}`;
+          bindPagination(box, (p) => { page = p; load(); });
+        } catch (e) { handleError(e); }
+      }
+      document.getElementById("cust-filters").addEventListener("submit", (e) => { e.preventDefault(); search = formData(e.target).search; page = 0; load(); });
+      load();
+    }
+
+    /* ----------------------------- Personnalisation ------------------------- */
+    function renderCustomize() {
+      setActive("customize", "Personnalisation");
+      const st = S.store, se = S.settings;
+      main.innerHTML = `
+        ${pageHeader("Personnalisation", `<a class="btn" href="${escapeHtml(getStoreUrl(st.id))}" target="_blank" rel="noopener">${icon("external")} Voir le résultat</a>`)}
+        <form id="customize-form" novalidate>
+          <div class="card mb-2"><h2>Identité</h2>
+            <div class="form-grid cols-2">
+              <div class="field"><label>Nom de la boutique *</label><input class="input" name="name" value="${escapeHtml(st.name)}" maxlength="120" required></div>
+              <div class="field"><label>Slogan</label><input class="input" name="slogan" value="${escapeHtml(st.slogan || "")}" maxlength="200"></div>
+              <div class="field span-2"><label>Description</label><textarea class="input" name="description" maxlength="2000">${escapeHtml(st.description || "")}</textarea></div>
+            </div>
+            <div class="form-grid cols-2">
+              <div>${imageField("logo_url", "Logo", st.logo_url).replace('data-upload="logo_url"', 'data-upload="logo_url" data-bucket="logos"')}</div>
+              <div>${imageField("favicon_url", "Favicon (icône d'onglet)", st.favicon_url).replace('data-upload="favicon_url"', 'data-upload="favicon_url" data-bucket="logos"')}</div>
+              <div class="span-2">${imageField("banner_url", "Bannière", st.banner_url, true).replace('data-upload="banner_url"', 'data-upload="banner_url" data-bucket="banners"')}</div>
+            </div>
+          </div>
+          <div class="card mb-2"><h2>Thème</h2>
+            <div class="theme-grid" id="themes">${Object.entries(THEMES).map(([k, t]) => `
+              <button type="button" class="theme-card ${se.theme === k ? "selected" : ""}" data-theme="${k}">
+                <div class="swatches">${["primary_color", "secondary_color", "background_color"].map((f) => `<span style="background:${t[f]}"></span>`).join("")}</div>
+                <strong>${t.label}</strong></button>`).join("")}</div>
+            <input type="hidden" name="theme" value="${escapeHtml(se.theme)}">
+          </div>
+          <div class="card mb-2"><h2>Couleurs</h2>
+            <div class="grid cols-2">
+              <div class="form-grid">${COLOR_FIELDS.map(([f, l]) => `
+                <div class="field"><label>${l}</label><div class="color-field">
+                  <input type="color" data-color="${f}" value="${se[f]}"><input class="input" name="${f}" value="${se[f]}" maxlength="7" pattern="^#[0-9a-fA-F]{6}$"></div></div>`).join("")}</div>
+              <div><label class="small muted" style="font-weight:600">Aperçu</label><div class="preview mt-1" id="preview"></div></div>
+            </div>
+          </div>
+          <div class="row" style="justify-content:flex-end"><button class="btn btn-primary" type="submit">Enregistrer</button></div>
+        </form>`;
+      const form = document.getElementById("customize-form");
+      bindImageFields(form, "logos", 1200);
+      const updatePreview = () => {
+        const d = formData(form);
+        document.getElementById("preview").innerHTML = `
+          <div class="p-head" style="background:${d.primary_color};color:#fff"><strong>${escapeHtml(d.name || "Ma boutique")}</strong></div>
+          <div class="p-body" style="background:${d.background_color};color:${d.text_color}">
+            <div style="font-weight:700;margin-bottom:.25rem">${escapeHtml(d.slogan || "Votre slogan")}</div>
+            <div style="color:${d.secondary_color};font-weight:700;margin-bottom:.75rem">2 500 DA</div>
+            <span class="p-btn" style="background:${d.button_color};color:#fff">Ajouter au panier</span></div>`;
+      };
+      const isHex = (v) => /^#[0-9a-fA-F]{6}$/.test(v);
+      form.querySelectorAll("[data-color]").forEach((picker) => {
+        const text = form.querySelector(`input[name="${picker.dataset.color}"]`);
+        picker.addEventListener("input", () => { text.value = picker.value; updatePreview(); });
+        text.addEventListener("input", () => { if (isHex(text.value)) { picker.value = text.value; updatePreview(); } });
+      });
+      form.querySelectorAll("[data-theme]").forEach((b) => (b.onclick = () => {
+        const t = THEMES[b.dataset.theme];
+        form.theme.value = b.dataset.theme;
+        form.querySelectorAll("[data-theme]").forEach((x) => x.classList.toggle("selected", x === b));
+        COLOR_FIELDS.forEach(([f]) => { form[f].value = t[f]; form.querySelector(`[data-color="${f}"]`).value = t[f]; });
+        updatePreview();
+      }));
+      form.name.addEventListener("input", updatePreview);
+      form.slogan.addEventListener("input", updatePreview);
+      updatePreview();
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        if (!d.name) return showToast("Le nom de la boutique est obligatoire.", "error");
+        const bad = COLOR_FIELDS.find(([f]) => !isHex(d[f]));
+        if (bad) return showToast(`${bad[1]} : format attendu #RRGGBB.`, "error");
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const s1 = await sb.from("stores").update({
+              name: d.name, slogan: d.slogan || null, description: d.description || null,
+              logo_url: d.logo_url || null, favicon_url: d.favicon_url || null, banner_url: d.banner_url || null,
+            }).eq("id", S.store.id).select().single();
+            if (s1.error) throw s1.error;
+            const s2 = await sb.from("store_settings").update(Object.fromEntries([["theme", d.theme], ...COLOR_FIELDS.map(([f]) => [f, d[f]])]))
+              .eq("store_id", S.store.id).select().single();
+            if (s2.error) throw s2.error;
+            S.store = s1.data; S.settings = s2.data;
+            showToast("Personnalisation enregistrée.", "success");
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    /* ----------------------------- Paramètres ------------------------------- */
+    async function renderSettings() {
+      setActive("settings", "Paramètres");
+      const se = S.settings, st = S.store;
+      const profile = await getCurrentProfile();
+      const f = (name, label, value, attrs = "") =>
+        `<div class="field"><label>${label}</label><input class="input" name="${name}" value="${escapeHtml(value ?? "")}" ${attrs}></div>`;
+      main.innerHTML = `
+        ${pageHeader("Paramètres")}
+        <form id="settings-form" novalidate>
+          <div class="card mb-2"><h2>Contact</h2><div class="form-grid cols-2">
+            ${f("contact_phone", "Téléphone", se.contact_phone, 'type="tel" maxlength="30"')}
+            ${f("contact_whatsapp", "WhatsApp (format international)", se.contact_whatsapp, 'type="tel" maxlength="30" placeholder="+213…"')}
+            ${f("contact_email", "Email", se.contact_email, 'type="email" maxlength="120"')}
+            ${f("opening_hours", "Horaires", se.opening_hours, 'maxlength="300" placeholder="Sam–Jeu 9h–19h"')}
+            <div class="span-2">${f("address", "Adresse", st.address, 'maxlength="300"')}</div></div></div>
+          <div class="card mb-2"><h2>Réseaux sociaux</h2><div class="form-grid cols-3">
+            ${f("instagram_url", "Instagram", se.instagram_url, 'type="url" placeholder="https://instagram.com/…"')}
+            ${f("facebook_url", "Facebook", se.facebook_url, 'type="url" placeholder="https://facebook.com/…"')}
+            ${f("tiktok_url", "TikTok", se.tiktok_url, 'type="url" placeholder="https://tiktok.com/@…"')}</div></div>
+          <div class="card mb-2"><h2>Commandes et livraison</h2>
+            <label class="checkbox mb-2"><input type="checkbox" name="whatsapp_order_enabled" ${se.whatsapp_order_enabled ? "checked" : ""}> Activer « Commander via WhatsApp »</label>
+            <div class="form-grid cols-2">
+              ${f("delivery_fee", "Frais de livraison", se.delivery_fee, 'type="number" min="0" step="0.01"')}
+              ${f("currency", "Devise", se.currency, 'maxlength="8"')}
+              <div class="field span-2"><label>Informations de livraison</label><textarea class="input" name="delivery_info" maxlength="1000" placeholder="Livraison 58 wilayas sous 48-72 h…">${escapeHtml(se.delivery_info || "")}</textarea></div></div></div>
+          <div class="card mb-2"><h2>Référencement (SEO)</h2><div class="form-grid">
+            ${f("seo_title", "Titre de la page", se.seo_title, 'maxlength="120" placeholder="' + escapeHtml(st.name) + '"')}
+            <div class="field"><label>Description (moteurs de recherche et partages)</label><textarea class="input" name="seo_description" maxlength="300">${escapeHtml(se.seo_description || "")}</textarea></div></div></div>
+          <div class="row mb-3" style="justify-content:flex-end"><button class="btn btn-primary" type="submit">Enregistrer</button></div>
+        </form>
+        <form id="account-form" class="card mb-2" novalidate><h2>Mon compte</h2><div class="form-grid cols-2">
+          ${f("first_name", "Prénom", profile.first_name, 'maxlength="80"')}${f("last_name", "Nom", profile.last_name, 'maxlength="80"')}
+          ${f("phone", "Téléphone", profile.phone, 'type="tel" maxlength="30"')}${f("whatsapp", "WhatsApp", profile.whatsapp, 'type="tel" maxlength="30"')}
+          ${f("city", "Ville", profile.city, 'maxlength="80"')}${f("country", "Pays", profile.country, 'maxlength="80"')}</div>
+          <p class="small muted">Email : ${escapeHtml(profile.email)}</p>
+          <div class="row" style="justify-content:flex-end"><button class="btn" type="submit">Enregistrer mon compte</button></div></form>
+        <form id="password-form" class="card" novalidate><h2>Mot de passe</h2><div class="form-grid cols-2">
+          ${f("password", "Nouveau mot de passe", "", 'type="password" autocomplete="new-password" minlength="8"')}
+          ${f("password_confirm", "Confirmation", "", 'type="password" autocomplete="new-password"')}</div>
+          <div class="row" style="justify-content:flex-end"><button class="btn" type="submit">Changer le mot de passe</button></div></form>`;
+
+      const form = document.getElementById("settings-form");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(form);
+        for (const k of ["instagram_url", "facebook_url", "tiktok_url"]) {
+          if (d[k] && !safeUrl(d[k]).startsWith("http")) return showToast("Lien de réseau social invalide (https://…).", "error");
+        }
+        const row = {
+          contact_phone: d.contact_phone || null, contact_whatsapp: d.contact_whatsapp || null,
+          contact_email: d.contact_email || null, opening_hours: d.opening_hours || null,
+          instagram_url: d.instagram_url || null, facebook_url: d.facebook_url || null, tiktok_url: d.tiktok_url || null,
+          whatsapp_order_enabled: d.whatsapp_order_enabled, delivery_fee: Number(d.delivery_fee || 0),
+          currency: d.currency || "DZD", delivery_info: d.delivery_info || null,
+          seo_title: d.seo_title || null, seo_description: d.seo_description || null,
+        };
+        if (row.whatsapp_order_enabled && !row.contact_whatsapp) return showToast("Renseignez votre numéro WhatsApp pour activer la commande WhatsApp.", "error");
+        await withBusy(form.querySelector("[type=submit]"), async () => {
+          try {
+            const r1 = await sb.from("store_settings").update(row).eq("store_id", S.store.id).select().single();
+            if (r1.error) throw r1.error;
+            const r2 = await sb.from("stores").update({ address: d.address || null }).eq("id", S.store.id).select().single();
+            if (r2.error) throw r2.error;
+            S.settings = r1.data; S.store = r2.data;
+            showToast("Paramètres enregistrés.", "success");
+          } catch (err) { handleError(err); }
+        });
+      });
+      const acc = document.getElementById("account-form");
+      acc.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(acc);
+        await withBusy(acc.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = await sb.from("profiles").update({
+              first_name: d.first_name, last_name: d.last_name, phone: d.phone || null,
+              whatsapp: d.whatsapp || null, city: d.city || null, country: d.country || null,
+            }).eq("id", S.status.user_id);
+            if (error) throw error;
+            showToast("Compte mis à jour.", "success");
+          } catch (err) { handleError(err); }
+        });
+      });
+      const pw = document.getElementById("password-form");
+      pw.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const d = formData(pw);
+        if (d.password.length < 8) return showToast("8 caractères minimum.", "error");
+        if (d.password !== d.password_confirm) return showToast("Les deux mots de passe ne correspondent pas.", "error");
+        await withBusy(pw.querySelector("[type=submit]"), async () => {
+          try {
+            const { error } = await sb.auth.updateUser({ password: d.password });
+            if (error) throw error;
+            pw.reset(); showToast("Mot de passe modifié.", "success");
+          } catch (err) { handleError(err); }
+        });
+      });
+    }
+
+    /* ----------------------------- Abonnement ------------------------------- */
+    async function renderSubscription() {
+      setActive("subscription", "Abonnement");
+      const st = S.status;
+      const [{ count: pc }, { count: cc }, plans] = await Promise.all([
+        sb.from("products").select("id", { count: "exact", head: true }).eq("store_id", S.store.id),
+        sb.from("categories").select("id", { count: "exact", head: true }).eq("store_id", S.store.id),
+        sb.from("plans").select("id, name, price, duration_days, max_products").eq("active", true).order("sort_order"),
+      ]);
+      const exp = expiryMessage(st.days_left);
+      const usage = (used, max, label) => `<div class="mb-2"><div class="row-between small"><span>${label}</span>
+        <span class="muted">${used} / ${max === null ? "illimité" : max}</span></div>
+        ${max !== null ? `<div class="usage"><span style="width:${Math.min(100, Math.round((used / Math.max(max, 1)) * 100))}%"></span></div>` : ""}</div>`;
+      const renew = SUPPORT_WHATSAPP ? `<a class="btn btn-success" target="_blank" rel="noopener"
+        href="${whatsappLink(SUPPORT_WHATSAPP, `Bonjour, je souhaite renouveler / changer mon abonnement pour la boutique « ${S.store.name} ».`)}">${icon("whatsapp")} Renouveler ou changer de formule</a>` : "";
+      main.innerHTML = `
+        ${pageHeader("Abonnement")}
+        ${exp.text ? `<div class="alert alert-${exp.level}">${escapeHtml(exp.text)}</div>` : ""}
+        <div class="grid cols-2">
+          <div class="card"><h2>${escapeHtml(st.plan_name || "—")} ${stateBadge(st.state)}</h2><dl class="kv">
+            <dt>Date de début</dt><dd>${formatDate(st.start_date)}</dd>
+            <dt>Date d'expiration</dt><dd>${formatDate(st.end_date)}</dd>
+            <dt>Jours restants</dt><dd>${st.days_left ?? "—"}</dd></dl>
+            <div class="mt-2">${renew}</div></div>
+          <div class="card"><h2>Utilisation</h2>${usage(pc || 0, st.max_products, "Produits")}${usage(cc || 0, st.max_categories, "Catégories")}</div>
+        </div>
+        ${plans.data && plans.data.length ? `<div class="card mt-2"><h2>Formules disponibles</h2>
+          <div class="table-wrap"><table class="table"><tbody>${plans.data.map((p) => `<tr>
+            <td class="cell-main" data-label="">${escapeHtml(p.name)} ${p.id === st.plan_id ? '<span class="badge badge-primary">Actuelle</span>' : ""}</td>
+            <td data-label="Prix">${formatPrice(p.price)} / ${p.duration_days} j</td>
+            <td data-label="Produits">${p.max_products ?? "Illimité"} produits</td></tr>`).join("")}</tbody></table></div>
+          <p class="small muted mt-2 mb-0">Le paiement se fait directement avec notre équipe. Contactez-nous pour changer de formule.</p></div>` : ""}`;
+    }
+
+    /* ----------------------------- Installation (PWA) ----------------------- */
+    let installPrompt = null;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      installPrompt = e;
+      const btn = document.getElementById("install-btn");
+      btn.innerHTML = `${icon("plus")} Installer l'application`;
+      btn.classList.remove("hidden");
+      btn.onclick = async () => {
+        installPrompt.prompt();
+        await installPrompt.userChoice.catch(() => null);
+        installPrompt = null; btn.classList.add("hidden");
+      };
+    });
+    window.addEventListener("appinstalled", () => document.getElementById("install-btn").classList.add("hidden"));
+
+    /* ----------------------------- Démarrage -------------------------------- */
+    (async function init() {
+      try {
+        const status = await checkSubscription();
+        if (!status) return;
+        S.status = status;
+        // Boutique déterminée par la session : utilisateur → profil → boutique.
+        S.store = await getCurrentStore();
+        if (!S.store) return window.location.replace("pending.html");
+        const { data: settings, error } = await sb.from("store_settings").select("*").eq("store_id", S.store.id).single();
+        if (error) throw error;
+        S.settings = settings;
+        renderShell();
+        const user = await getCurrentUser();
+        document.getElementById("user-email").textContent = user.email;
+        window.addEventListener("hashchange", router);
+        router();
+        refreshBadges();
+        setInterval(refreshBadges, 60000);
+        registerServiceWorker();
+      } catch (e) {
+        console.error(e);
+        main.innerHTML = '<div class="card empty">Une erreur est survenue. <button class="btn btn-sm mt-1" onclick="location.reload()">Réessayer</button></div>';
+      }
+    })();
+  </script>
+</body>
+</html>

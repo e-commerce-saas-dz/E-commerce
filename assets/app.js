@@ -164,6 +164,7 @@ function escapeHtml(value) {
 
 // N'autorise que des URLs http(s) (empêche les liens "javascript:").
 function safeUrl(url) {
+  if (!url || typeof url !== "string") return "";
   try {
     const u = new URL(url, window.location.href);
     return (u.protocol === "https:" || u.protocol === "http:") ? u.href : "";
