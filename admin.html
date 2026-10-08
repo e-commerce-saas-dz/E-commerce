@@ -78,7 +78,7 @@
     const ACTION_LABELS = {
       signup: "Inscription", activate: "Activation", suspend: "Suspension", reactivate: "Réactivation",
       change_plan: "Changement de plan", extend: "Prolongation", set_dates: "Modification des dates",
-      expire: "Expiration automatique", promote_admin: "Promotion admin",
+      expire: "Expiration automatique", promote_admin: "Promotion admin", delete_client: "Suppression client",
       delete_product: "Suppression produit", delete_categorie: "Suppression catégorie",
     };
 
@@ -274,6 +274,7 @@
       if (!compact && c.plan_id) out.push(b("dates", "Modifier les dates"));
       if (!compact) out.push(b("edit", `${icon("edit")} Modifier`));
       if (c.state !== "suspended") out.push(b("suspend", "Suspendre", "btn-danger"));
+      if (c.state === "suspended") out.push(`<button class="btn btn-sm btn-danger" data-act="delete" data-store="${c.store_id}" title="Supprimer définitivement">${icon("trash")}${compact ? "" : " Supprimer"}</button>`);
       out.push(`<a class="btn btn-sm" href="${getStoreUrl(c.store_id)}" target="_blank" rel="noopener" title="Ouvrir la boutique">${icon("external")}${compact ? "" : " Ouvrir la boutique"}</a>`);
       return out.join("");
     }
@@ -282,7 +283,8 @@
       container.querySelectorAll("[data-act]").forEach((btn) => btn.addEventListener("click", () => {
         const c = rows.find((r) => r.store_id === btn.dataset.store);
         const handlers = { activate: openActivate, suspend: doSuspend, reactivate: doReactivate,
-                           extend: openExtend, plan: openChangePlan, dates: openDates, edit: openEditClient };
+                           extend: openExtend, plan: openChangePlan, dates: openDates, edit: openEditClient,
+                           delete: doDeleteClient };
         handlers[btn.dataset.act](c, onDone);
       }));
     }
@@ -368,6 +370,23 @@
           showToast("Compte suspendu.", "success"); onDone();
         } catch (err) { handleError(err); }
       });
+    }
+
+    // Suppression définitive d'un client suspendu (compte, boutique, produits, commandes, images).
+    async function doDeleteClient(c, onDone) {
+      if (!(await confirmAction(`Supprimer définitivement ${c.first_name} ${c.last_name} (${c.store_name}) ? Son compte, sa boutique, ses produits, ses commandes et ses images seront effacés. Cette action est irréversible.`,
+        { confirmText: "Supprimer définitivement" }))) return;
+      try {
+        // Images d'abord (l'API Storage est la seule façon de les effacer) ; best effort.
+        for (const bucket of ["logos", "banners", "products"]) {
+          const { data: files } = await sb.storage.from(bucket).list(c.store_id, { limit: 1000 });
+          if (files && files.length) await sb.storage.from(bucket).remove(files.map((f) => `${c.store_id}/${f.name}`));
+        }
+        const { error } = await sb.rpc("admin_delete_client", { p_store_id: c.store_id });
+        if (error) throw error;
+        showToast("Client supprimé.", "success");
+        if (location.hash.startsWith("#client/")) location.hash = "#clients"; else onDone();
+      } catch (err) { handleError(err); }
     }
 
     async function doReactivate(c, onDone) {
@@ -604,6 +623,7 @@
       if (l.action === "set_dates") return `${formatDate(d.new_start_date)} → ${formatDate(d.new_end_date)}`;
       if (l.action === "change_plan") return `${escapeHtml(d.old_plan || "—")} → ${escapeHtml(d.new_plan)}`;
       if (l.action === "suspend") return escapeHtml(d.reason || "");
+      if (l.action === "delete_client") return escapeHtml(`${d.name || ""} · ${d.owner || ""} · ${d.email || ""}`);
       if (l.action.startsWith("delete_")) return escapeHtml(d.name || "");
       if (l.action === "signup") return escapeHtml(d.business_name || "");
       return "";

@@ -245,6 +245,7 @@ function friendlyError(error) {
   if (msg.includes("INVALID_CUSTOMER")) return "Vérifiez votre nom et votre numéro de téléphone.";
   if (msg.includes("INVALID_DATES")) return "Les dates saisies ne sont pas valides.";
   if (msg.includes("NOT_ACTIVATED")) return "Ce compte doit d'abord être activé.";
+  if (msg.includes("NOT_SUSPENDED")) return "Suspendez d'abord ce compte avant de le supprimer.";
   if (msg.includes("FORBIDDEN") || msg.includes("row-level security") || msg.includes("permission denied"))
     return "Action non autorisée.";
   if (msg.includes("Invalid login credentials")) return "Email ou mot de passe incorrect.";

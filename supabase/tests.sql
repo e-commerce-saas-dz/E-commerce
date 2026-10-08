@@ -534,6 +534,45 @@ begin
 end $$;
 
 -- =============================================================================
+-- 10. SUPPRESSION DÉFINITIVE D'UN CLIENT (corbeille admin)
+-- =============================================================================
+do $$
+declare v_store uuid := tests.store('A'); n int;
+begin
+  perform tests.login('B');
+  begin
+    perform public.admin_delete_client(v_store);
+    perform tests.check('suppression : refusée à un client', false);
+  exception when others then
+    perform tests.check('suppression : refusée à un client', sqlerrm = 'FORBIDDEN', sqlerrm);
+  end;
+  perform tests.logout();
+
+  perform tests.login('ADMIN');
+  begin
+    perform public.admin_delete_client(v_store);
+    perform tests.check('suppression : refusée si le compte n''est pas suspendu', false);
+  exception when others then
+    perform tests.check('suppression : refusée si le compte n''est pas suspendu', sqlerrm = 'NOT_SUSPENDED', sqlerrm);
+  end;
+  perform public.admin_suspend(v_store, 'test');
+  perform public.admin_delete_client(v_store);
+  perform tests.logout();
+
+  select (select count(*) from auth.users where id = tests.uid('A'))
+       + (select count(*) from public.profiles where id = tests.uid('A'))
+       + (select count(*) from public.stores where id = v_store)
+       + (select count(*) from public.products where store_id = v_store)
+       + (select count(*) from public.orders where store_id = v_store)
+       + (select count(*) from public.subscriptions where store_id = v_store) into n;
+  perform tests.check('suppression : compte, boutique, produits, commandes effacés', n = 0, n::text);
+  perform tests.check('suppression : tracée dans le journal',
+    exists (select 1 from public.audit_logs where action = 'delete_client' and details ->> 'email' = 'clienta@test.local'));
+  perform tests.check('suppression : les autres boutiques sont intactes',
+    exists (select 1 from public.stores where id = tests.store('B')));
+end $$;
+
+-- =============================================================================
 -- RÉSULTATS puis NETTOYAGE
 -- =============================================================================
 select tests.cleanup();
