@@ -274,7 +274,7 @@
       if (!compact && c.plan_id) out.push(b("dates", "Modifier les dates"));
       if (!compact) out.push(b("edit", `${icon("edit")} Modifier`));
       if (c.state !== "suspended") out.push(b("suspend", "Suspendre", "btn-danger"));
-      if (c.state === "suspended") out.push(`<button class="btn btn-sm btn-danger" data-act="delete" data-store="${c.store_id}" title="Supprimer définitivement">${icon("trash")}${compact ? "" : " Supprimer"}</button>`);
+      if (c.state === "suspended" && c.role !== "admin" && c.user_id !== state.status.user_id) out.push(`<button class="btn btn-sm btn-danger" data-act="delete" data-store="${c.store_id}" title="Supprimer définitivement">${icon("trash")}${compact ? "" : " Supprimer"}</button>`);
       out.push(`<a class="btn btn-sm" href="${getStoreUrl(c.store_id)}" target="_blank" rel="noopener" title="Ouvrir la boutique">${icon("external")}${compact ? "" : " Ouvrir la boutique"}</a>`);
       return out.join("");
     }
@@ -529,7 +529,7 @@
         whatsapp: o.whatsapp, city: o.city, country: o.country, store_id: store.id, store_name: store.name,
         business_type: store.business_type, address: store.address, plan_id: sub && sub.plan_id,
         plan_name: plan && plan.name, start_date: sub && sub.start_date, end_date: sub && sub.end_date,
-        days_left: daysLeft, state: stateValue,
+        days_left: daysLeft, state: stateValue, role: o.role,
       };
       const url = getStoreUrl(store.id);
       const dd = (label, value) => `<dt>${label}</dt><dd>${value || "—"}</dd>`;
