@@ -256,6 +256,8 @@ function friendlyError(error) {
   if (msg.includes("User already registered") || msg.includes("already been registered"))
     return "Un compte existe déjà avec cet email.";
   if (msg.includes("Password should be")) return "Le mot de passe doit contenir au moins 8 caractères.";
+  if (msg.includes("email rate limit"))
+    return "Trop d'emails envoyés pour le moment. Réessayez dans une heure ou contactez le support.";
   if (msg.includes("rate limit") || msg.includes("For security purposes"))
     return "Trop de tentatives. Patientez quelques instants puis réessayez.";
   if (msg.includes("duplicate key") && msg.includes("sku")) return "Cette référence existe déjà dans votre boutique.";
