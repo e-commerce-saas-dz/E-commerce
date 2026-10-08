@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>État du compte</title>
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+  <script src="assets/app.js"></script>
+</head>
+<body>
+  <main class="auth-page">
+    <div class="auth-card">
+      <a href="index.html" class="logo-mark"><span class="dot">S</span><span class="app-name"></span></a>
+      <div class="card center" id="state-card"><div class="page-loader" style="min-height:120px"><div class="spinner"></div></div></div>
+      <p class="auth-footer"><button class="btn btn-ghost btn-sm" id="logout-btn">Se déconnecter</button></p>
+    </div>
+  </main>
+
+  <script>
+    document.querySelectorAll(".app-name").forEach((el) => (el.textContent = APP_NAME));
+    document.getElementById("logout-btn").onclick = logout;
+
+    // Le contenu dépend de l'état calculé PAR LA BASE (jamais d'un paramètre d'URL).
+    const CONTENT = {
+      pending: {
+        badge: "En attente de validation", kind: "warning",
+        title: "Votre compte est en attente de validation.",
+        text: "Notre équipe vous contactera dans les prochaines 24 heures afin de confirmer votre abonnement.",
+      },
+      suspended: {
+        badge: "Compte suspendu", kind: "danger",
+        title: "Votre compte est suspendu.",
+        text: "L'accès à votre tableau de bord est temporairement bloqué. Contactez-nous pour le réactiver.",
+      },
+      expired: {
+        badge: "Abonnement expiré", kind: "danger",
+        title: "Votre abonnement a expiré.",
+        text: "Renouvelez votre abonnement pour retrouver l'accès à votre boutique et à votre tableau de bord.",
+      },
+    };
+
+    async function init() {
+      const user = await checkAuth();
+      if (!user) return;
+      try {
+        const status = await getAccountStatus();
+        const target = pageForStatus(status);
+        if (target !== "pending.html") return window.location.replace(target);
+
+        const c = CONTENT[status.state] || CONTENT.pending;
+        const reason = status.state === "suspended" && status.suspension_reason
+          ? `<div class="alert alert-danger">${escapeHtml(status.suspension_reason)}</div>` : "";
+        const ended = status.state === "expired" && status.end_date
+          ? `<p class="muted small">Date d'expiration : ${formatDate(status.end_date)}</p>` : "";
+        const support = SUPPORT_WHATSAPP
+          ? `<a class="btn btn-success" href="${whatsappLink(SUPPORT_WHATSAPP,
+              "Bonjour, je suis " + (status.first_name || "") + " (" + (status.store_name || "") + "). ")}"
+              target="_blank" rel="noopener">${icon("whatsapp")} Nous contacter</a>` : "";
+
+        document.getElementById("state-card").innerHTML = `
+          <span class="badge badge-${c.kind} mb-2">${escapeHtml(c.badge)}</span>
+          <h1>${escapeHtml(c.title)}</h1>
+          <p>${escapeHtml(c.text)}</p>
+          ${reason}${ended}
+          <p class="muted small">Boutique : <strong>${escapeHtml(status.store_name || "")}</strong></p>
+          <div class="row" style="justify-content:center">
+            ${support}
+            <button class="btn" id="refresh-btn">Actualiser</button>
+          </div>`;
+        document.getElementById("refresh-btn").onclick = () => location.reload();
+      } catch (e) {
+        handleError(e);
+      }
+    }
+    init();
+  </script>
+</body>
+</html>

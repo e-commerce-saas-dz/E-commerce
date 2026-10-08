@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Créez votre boutique en ligne</title>
+  <meta name="description" content="Créez votre boutique en ligne : catalogue, commandes, WhatsApp, QR code. Sans technique, sans commission.">
+  <meta property="og:title" content="Créez votre boutique en ligne">
+  <meta property="og:description" content="Catalogue, commandes, WhatsApp, QR code. Votre boutique prête en quelques minutes.">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+  <script src="assets/app.js"></script>
+  <style>
+    body { background: var(--surface); }
+    .nav-top { position: sticky; top: 0; z-index: 10; background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 1rem; }
+    .nav-top .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .nav-top .links { display: flex; gap: .5rem; }
+    .hero { padding: 3.5rem 0 3rem; text-align: center; }
+    .hero h1 { font-size: clamp(2rem, 6vw, 3.4rem); letter-spacing: -.035em; max-width: 820px; margin: 0 auto 1rem; }
+    .hero p { font-size: 1.12rem; color: var(--muted); max-width: 620px; margin: 0 auto 2rem; }
+    .hero .row { justify-content: center; }
+    .hero .btn { min-height: 50px; padding: 0 1.4rem; font-size: 1rem; }
+    .eyebrow { display: inline-block; margin-bottom: 1rem; white-space: normal; }
+    .section { padding: 3.5rem 0; }
+    .section.alt { background: var(--bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); text-align: center; letter-spacing: -.02em; }
+    .section .lead { text-align: center; color: var(--muted); max-width: 600px; margin: 0 auto 2.5rem; }
+    .feature .ic { width: 40px; height: 40px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); display: flex; align-items: center; justify-content: center; margin-bottom: .9rem; }
+    .feature h3 { margin-bottom: .35rem; }
+    .feature p { color: var(--muted); margin: 0; font-size: .93rem; }
+    .steps { counter-reset: s; }
+    .step::before { counter-increment: s; content: counter(s); display: inline-flex; width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: #fff; align-items: center; justify-content: center; font-weight: 700; margin-bottom: .75rem; }
+    .plan { display: flex; flex-direction: column; }
+    .plan.featured { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary), var(--shadow); }
+    .plan .price { font-size: 2rem; font-weight: 800; letter-spacing: -.03em; margin: .5rem 0 0; }
+    .plan ul { list-style: none; padding: 0; margin: 1.25rem 0 1.5rem; flex: 1; }
+    .plan li { display: flex; gap: .5rem; padding: .3rem 0; font-size: .93rem; }
+    .plan li svg { color: var(--success); margin-top: 2px; }
+    .cta { text-align: center; }
+    footer { padding: 2rem 0; color: var(--muted); font-size: .88rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <header class="nav-top">
+    <div class="wrap">
+      <a href="index.html" class="logo-mark"><span class="dot">S</span><span class="app-name"></span></a>
+      <div class="links">
+        <a class="btn btn-ghost btn-sm" href="login.html">Connexion</a>
+        <a class="btn btn-primary btn-sm" href="register.html">Créer ma boutique</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <span class="badge badge-primary eyebrow">Vêtements, parfums, cosmétiques, déco, électronique…</span>
+        <h1>Votre boutique en ligne, prête en quelques minutes.</h1>
+        <p>Ajoutez vos produits, partagez votre lien ou votre QR code, et recevez vos commandes directement sur votre téléphone ou sur WhatsApp.</p>
+        <div class="row">
+          <a class="btn btn-primary" href="register.html">Créer ma boutique</a>
+          <a class="btn" href="#tarifs">Voir les tarifs</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="wrap">
+        <h2>Tout ce qu'il faut pour vendre</h2>
+        <p class="lead">Un seul outil, simple, pensé pour le téléphone.</p>
+        <div class="grid cols-3" id="features"></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <h2>Comment ça marche</h2>
+        <p class="lead">Pas de technique, pas d'installation.</p>
+        <div class="grid cols-3 steps">
+          <div class="card step"><h3>Inscrivez-vous</h3><p class="muted mb-0">Remplissez le formulaire : votre boutique est créée immédiatement.</p></div>
+          <div class="card step"><h3>Nous vous appelons</h3><p class="muted mb-0">Notre équipe vous contacte sous 24 h pour valider votre abonnement.</p></div>
+          <div class="card step"><h3>Vendez</h3><p class="muted mb-0">Personnalisez, ajoutez vos produits, partagez votre lien. Les commandes arrivent.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="tarifs">
+      <div class="wrap">
+        <h2>Des formules claires</h2>
+        <p class="lead">Paiement simple, sans engagement. Changez de formule quand vous voulez.</p>
+        <div class="grid cols-3" id="plans"><div class="page-loader" style="min-height:120px"><div class="spinner"></div></div></div>
+      </div>
+    </section>
+
+    <section class="section cta">
+      <div class="wrap">
+        <h2>Prêt à lancer votre boutique ?</h2>
+        <p class="lead">Créez votre compte maintenant, on s'occupe du reste.</p>
+        <a class="btn btn-primary" style="min-height:50px;padding:0 1.6rem" href="register.html">Créer ma boutique</a>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="wrap">© <span id="year"></span> <span class="app-name"></span></div></footer>
+
+  <script>
+    document.querySelectorAll(".app-name").forEach((el) => (el.textContent = APP_NAME));
+    document.getElementById("year").textContent = new Date().getFullYear();
+
+    const FEATURES = [
+      ["store", "Votre propre boutique", "Votre logo, vos couleurs, vos textes. Un lien unique à partager partout."],
+      ["box", "Produits et catégories", "Photos, prix, promotions, stock. Tout se gère depuis le téléphone."],
+      ["cart", "Commandes", "Panier, commande en un clic, suivi des statuts, liste de vos clients."],
+      ["whatsapp", "Commande WhatsApp", "Vos clients peuvent vous envoyer leur commande toute prête sur WhatsApp."],
+      ["qr", "QR code", "Imprimez-le sur vos cartes, flyers, emballages ou publiez-le sur Instagram."],
+      ["palette", "Thèmes", "Classic, Modern, Minimal, Elegant : changez de style en un clic."],
+    ];
+    document.getElementById("features").innerHTML = FEATURES.map(([ic, t, d]) =>
+      `<div class="card feature"><div class="ic">${icon(ic)}</div><h3>${t}</h3><p>${d}</p></div>`).join("");
+
+    const FEATURE_LABELS = {
+      orders: "Commandes", whatsapp: "Commande WhatsApp", stats: "Statistiques",
+      advanced_stats: "Statistiques avancées", custom_theme: "Personnalisation avancée",
+    };
+
+    async function loadPlans() {
+      const box = document.getElementById("plans");
+      if (!IS_CONFIGURED) { box.closest("section").classList.add("hidden"); return; }
+      try {
+        const { data, error } = await sb.from("plans")
+          .select("id, name, description, price, duration_days, max_products, max_categories, features")
+          .eq("active", true).order("sort_order").order("price");
+        if (error) throw error;
+        if (!data.length) { box.closest("section").classList.add("hidden"); return; }
+        box.innerHTML = data.map((p, i) => {
+          const items = [
+            p.max_products === null ? "Produits illimités" : `${p.max_products} produits`,
+            p.max_categories === null ? "Catégories illimitées" : `${p.max_categories} catégories`,
+            ...(p.features || []).map((f) => FEATURE_LABELS[f] || f),
+          ];
+          return `<div class="card plan ${i === 1 ? "featured" : ""}">
+            <div class="row-between"><h3 class="mb-0">${escapeHtml(p.name)}</h3>${i === 1 ? '<span class="badge badge-primary">Populaire</span>' : ""}</div>
+            <div class="price">${formatPrice(p.price)}</div>
+            <div class="muted small">pour ${p.duration_days} jours</div>
+            <p class="muted small mt-1 mb-0">${escapeHtml(p.description || "")}</p>
+            <ul>${items.map((t) => `<li>${icon("check")}<span>${escapeHtml(t)}</span></li>`).join("")}</ul>
+            <a class="btn ${i === 1 ? "btn-primary" : ""} btn-block" href="register.html">Choisir ${escapeHtml(p.name)}</a>
+          </div>`;
+        }).join("");
+      } catch (e) {
+        console.error(e);
+        box.closest("section").classList.add("hidden");
+      }
+    }
+    loadPlans();
+    registerServiceWorker();
+  </script>
+</body>
+</html>

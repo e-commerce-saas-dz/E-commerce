@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Créer ma boutique</title>
+  <meta name="description" content="Créez votre boutique en ligne en quelques minutes.">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+  <script src="assets/app.js"></script>
+</head>
+<body>
+  <main class="auth-page">
+    <div class="auth-card wide">
+      <a href="index.html" class="logo-mark"><span class="dot">S</span><span class="app-name"></span></a>
+
+      <div class="card" id="form-card">
+        <h1>Créer ma boutique</h1>
+        <p class="muted">Remplissez le formulaire. Notre équipe valide votre compte sous 24 heures.</p>
+
+        <form id="register-form" novalidate>
+          <div class="form-grid cols-2">
+            <div class="field"><label for="first_name">Prénom *</label>
+              <input class="input" id="first_name" name="first_name" autocomplete="given-name" required maxlength="80"></div>
+            <div class="field"><label for="last_name">Nom *</label>
+              <input class="input" id="last_name" name="last_name" autocomplete="family-name" required maxlength="80"></div>
+            <div class="field span-2"><label for="business_name">Nom du commerce *</label>
+              <input class="input" id="business_name" name="business_name" required maxlength="120" placeholder="Ex. Maison Lina"></div>
+            <div class="field"><label for="business_type">Type de commerce *</label>
+              <select class="input" id="business_type" name="business_type" required>
+                <option value="">Choisir…</option>
+                <option>Vêtements</option><option>Chaussures</option><option>Parfums</option>
+                <option>Cosmétiques</option><option>Alimentation</option><option>Meubles</option>
+                <option>Électronique</option><option>Accessoires</option><option>Pièces automobiles</option>
+                <option>Artisanat</option><option>Décoration</option><option>Autre</option>
+              </select></div>
+            <div class="field"><label for="email">Email *</label>
+              <input class="input" id="email" name="email" type="email" autocomplete="email" required maxlength="120"></div>
+            <div class="field"><label for="phone">Téléphone *</label>
+              <input class="input" id="phone" name="phone" type="tel" autocomplete="tel" required maxlength="30" placeholder="0550 00 00 00"></div>
+            <div class="field"><label for="whatsapp">WhatsApp</label>
+              <input class="input" id="whatsapp" name="whatsapp" type="tel" maxlength="30" placeholder="+213 550 00 00 00">
+              <span class="hint">Format international conseillé (+213…).</span></div>
+            <div class="field"><label for="city">Ville *</label>
+              <input class="input" id="city" name="city" autocomplete="address-level2" required maxlength="80"></div>
+            <div class="field"><label for="country">Pays *</label>
+              <input class="input" id="country" name="country" autocomplete="country-name" required maxlength="80" value="Algérie"></div>
+            <div class="field"><label for="password">Mot de passe *</label>
+              <input class="input" id="password" name="password" type="password" autocomplete="new-password" required minlength="8">
+              <span class="hint">8 caractères minimum.</span></div>
+            <div class="field"><label for="password_confirm">Confirmation du mot de passe *</label>
+              <input class="input" id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required minlength="8"></div>
+          </div>
+          <div class="form-error hidden" id="form-error" role="alert"></div>
+          <button class="btn btn-primary btn-block" type="submit" id="submit-btn">Créer ma boutique</button>
+        </form>
+      </div>
+
+      <div class="card hidden" id="success-card">
+        <div class="center">
+          <span class="badge badge-warning mb-2">En attente de validation</span>
+          <h1>Votre compte est en attente de validation.</h1>
+          <p>Notre équipe vous contactera dans les prochaines 24 heures afin de confirmer votre abonnement.</p>
+          <div class="alert alert-info hidden" id="confirm-email-note">
+            Un email de confirmation vient de vous être envoyé. Cliquez sur le lien qu'il contient pour activer votre adresse.
+          </div>
+          <a class="btn btn-primary" href="login.html">Aller à la connexion</a>
+        </div>
+      </div>
+
+      <p class="auth-footer">Déjà un compte ? <a href="login.html">Se connecter</a></p>
+    </div>
+  </main>
+
+  <script>
+    document.querySelectorAll(".app-name").forEach((el) => (el.textContent = APP_NAME));
+    if (!IS_CONFIGURED) showConfigError();
+
+    const form = document.getElementById("register-form");
+    const errorBox = document.getElementById("form-error");
+
+    function showFormError(message, field) {
+      errorBox.textContent = message;
+      errorBox.classList.remove("hidden");
+      form.querySelectorAll("[aria-invalid]").forEach((el) => el.removeAttribute("aria-invalid"));
+      if (field) { const el = form.elements[field]; el.setAttribute("aria-invalid", "true"); el.focus(); }
+    }
+
+    function validate(d) {
+      const required = ["first_name", "last_name", "business_name", "business_type", "email", "phone", "city", "country", "password"];
+      for (const f of required) if (!d[f]) return ["Veuillez remplir tous les champs obligatoires.", f];
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) return ["Adresse email invalide.", "email"];
+      if (!/^[0-9+() .-]{6,30}$/.test(d.phone)) return ["Numéro de téléphone invalide.", "phone"];
+      if (d.whatsapp && !/^[0-9+() .-]{6,30}$/.test(d.whatsapp)) return ["Numéro WhatsApp invalide.", "whatsapp"];
+      if (d.password.length < 8) return ["Le mot de passe doit contenir au moins 8 caractères.", "password"];
+      if (d.password !== d.password_confirm) return ["Les deux mots de passe ne correspondent pas.", "password_confirm"];
+      return null;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const d = formData(form);
+      const invalid = validate(d);
+      if (invalid) return showFormError(...invalid);
+      errorBox.classList.add("hidden");
+
+      await withBusy(document.getElementById("submit-btn"), async () => {
+        try {
+          // Le profil, la boutique, les paramètres et l'abonnement "pending" sont créés
+          // par la base (trigger SQL). Le rôle n'est PAS envoyé : il est toujours "client".
+          const { data, error } = await sb.auth.signUp({
+            email: d.email,
+            password: d.password,
+            options: {
+              emailRedirectTo: APP_BASE_URL + "login.html",
+              data: {
+                first_name: d.first_name, last_name: d.last_name,
+                business_name: d.business_name, business_type: d.business_type,
+                phone: d.phone, whatsapp: d.whatsapp || d.phone,
+                city: d.city, country: d.country,
+              },
+            },
+          });
+          if (error) throw error;
+          // Supabase renvoie un utilisateur sans identités si l'email existe déjà.
+          if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+            return showFormError("Un compte existe déjà avec cet email.", "email");
+          }
+          if (data.session) return window.location.replace("pending.html");
+          document.getElementById("form-card").classList.add("hidden");
+          document.getElementById("confirm-email-note").classList.remove("hidden");
+          document.getElementById("success-card").classList.remove("hidden");
+          window.scrollTo(0, 0);
+        } catch (err) {
+          console.error(err);
+          showFormError(friendlyError(err));
+        }
+      });
+    });
+  </script>
+</body>
+</html>

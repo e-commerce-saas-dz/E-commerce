@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Connexion</title>
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+  <script src="assets/app.js"></script>
+</head>
+<body>
+  <main class="auth-page">
+    <div class="auth-card">
+      <a href="index.html" class="logo-mark"><span class="dot">S</span><span class="app-name"></span></a>
+
+      <!-- Connexion -->
+      <div class="card" id="login-card">
+        <h1>Connexion</h1>
+        <p class="muted">Accédez à votre espace.</p>
+        <form id="login-form" novalidate>
+          <div class="field"><label for="email">Email</label>
+            <input class="input" id="email" name="email" type="email" autocomplete="email" required></div>
+          <div class="field"><label for="password">Mot de passe</label>
+            <input class="input" id="password" name="password" type="password" autocomplete="current-password" required></div>
+          <div class="form-error hidden" id="login-error" role="alert"></div>
+          <button class="btn btn-primary btn-block" type="submit" id="login-btn">Se connecter</button>
+        </form>
+        <p class="center mt-2 mb-0"><button class="btn btn-ghost btn-sm" id="show-forgot">Mot de passe oublié ?</button></p>
+      </div>
+
+      <!-- Mot de passe oublié -->
+      <div class="card hidden" id="forgot-card">
+        <h1>Mot de passe oublié</h1>
+        <p class="muted">Recevez un lien pour choisir un nouveau mot de passe.</p>
+        <form id="forgot-form" novalidate>
+          <div class="field"><label for="forgot-email">Email</label>
+            <input class="input" id="forgot-email" name="email" type="email" autocomplete="email" required></div>
+          <button class="btn btn-primary btn-block" type="submit" id="forgot-btn">Envoyer le lien</button>
+        </form>
+        <p class="center mt-2 mb-0"><button class="btn btn-ghost btn-sm" id="back-login">Retour à la connexion</button></p>
+      </div>
+
+      <!-- Nouveau mot de passe (après clic sur le lien reçu par email) -->
+      <div class="card hidden" id="reset-card">
+        <h1>Nouveau mot de passe</h1>
+        <form id="reset-form" novalidate>
+          <div class="field"><label for="new-password">Nouveau mot de passe</label>
+            <input class="input" id="new-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+            <span class="hint">8 caractères minimum.</span></div>
+          <div class="field"><label for="new-password-confirm">Confirmation</label>
+            <input class="input" id="new-password-confirm" name="password_confirm" type="password" autocomplete="new-password" required></div>
+          <div class="form-error hidden" id="reset-error" role="alert"></div>
+          <button class="btn btn-primary btn-block" type="submit" id="reset-btn">Enregistrer</button>
+        </form>
+      </div>
+
+      <p class="auth-footer">Pas encore de boutique ? <a href="register.html">Créer ma boutique</a></p>
+    </div>
+  </main>
+
+  <script>
+    document.querySelectorAll(".app-name").forEach((el) => (el.textContent = APP_NAME));
+    const cards = ["login-card", "forgot-card", "reset-card"];
+    function show(id) { cards.forEach((c) => document.getElementById(c).classList.toggle("hidden", c !== id)); }
+
+    document.getElementById("show-forgot").onclick = () => show("forgot-card");
+    document.getElementById("back-login").onclick = () => show("login-card");
+
+    let recovering = new URLSearchParams(location.search).get("mode") === "reset"
+      || location.hash.includes("type=recovery");
+
+    async function init() {
+      if (!IS_CONFIGURED) return showConfigError();
+      sb.auth.onAuthStateChange((event) => {
+        if (event === "PASSWORD_RECOVERY") { recovering = true; show("reset-card"); }
+      });
+      if (recovering) return show("reset-card");
+      // Déjà connecté (session restaurée) : on redirige directement.
+      try {
+        const user = await getCurrentUser();
+        if (user) await redirectByStatus();
+      } catch (e) { console.error(e); }
+    }
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const d = formData(e.target);
+      const box = document.getElementById("login-error");
+      box.classList.add("hidden");
+      if (!d.email || !d.password) { box.textContent = "Saisissez votre email et votre mot de passe."; return box.classList.remove("hidden"); }
+      await withBusy(document.getElementById("login-btn"), async () => {
+        try {
+          const { error } = await sb.auth.signInWithPassword({ email: d.email, password: d.password });
+          if (error) throw error;
+          await redirectByStatus();
+        } catch (err) {
+          console.error(err);
+          box.textContent = friendlyError(err);
+          box.classList.remove("hidden");
+        }
+      });
+    });
+
+    document.getElementById("forgot-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const { email } = formData(e.target);
+      if (!email) return showToast("Saisissez votre email.", "error");
+      await withBusy(document.getElementById("forgot-btn"), async () => {
+        try {
+          const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: APP_BASE_URL + "login.html?mode=reset" });
+          if (error) throw error;
+          showToast("Si un compte existe, un email vient d'être envoyé.", "success", 5000);
+          show("login-card");
+        } catch (err) { handleError(err); }
+      });
+    });
+
+    document.getElementById("reset-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const d = formData(e.target);
+      const box = document.getElementById("reset-error");
+      box.classList.add("hidden");
+      if (d.password.length < 8 || d.password !== d.password_confirm) {
+        box.textContent = d.password.length < 8 ? "8 caractères minimum." : "Les deux mots de passe ne correspondent pas.";
+        return box.classList.remove("hidden");
+      }
+      await withBusy(document.getElementById("reset-btn"), async () => {
+        try {
+          const { error } = await sb.auth.updateUser({ password: d.password });
+          if (error) throw error;
+          showToast("Mot de passe modifié.", "success");
+          history.replaceState(null, "", "login.html");
+          await redirectByStatus();
+        } catch (err) {
+          console.error(err);
+          box.textContent = friendlyError(err) === "Une erreur est survenue."
+            ? "Le lien a expiré. Demandez un nouveau lien." : friendlyError(err);
+          box.classList.remove("hidden");
+        }
+      });
+    });
+
+    init();
+  </script>
+</body>
+</html>
