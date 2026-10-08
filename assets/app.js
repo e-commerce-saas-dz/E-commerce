@@ -7,8 +7,8 @@
 // ============================ CONFIGURATION ==================================
 // Remplacer ces deux valeurs (Supabase → Project Settings → API).
 // N'utiliser QUE la clé publique "anon". JAMAIS la clé "service_role".
-const SUPABASE_URL = "YOUR_SUPABASE_URL";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const SUPABASE_URL = "https://eskscxkqfkdjjuaykjdu.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_FQMPi8PmWTS96oJRU67uDw_Bu1K1OW3";
 
 // Nom affiché de la plateforme.
 const APP_NAME = "MonSaaS";
